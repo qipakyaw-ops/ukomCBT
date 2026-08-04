@@ -1,20 +1,31 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Stethoscope, Mail, Lock, User, Eye, EyeOff, ArrowRight, GraduationCap } from 'lucide-react';
+import { useAuth } from '@/lib/AuthContext';
 
 export default function Register() {
   const navigate = useNavigate();
+  const { register } = useAuth();
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      // New users register as Student by default
+    setError(null);
+
+    try {
+      const user = await register(name, email, password, 'student');
       navigate('/student/dashboard');
-    }, 700);
+    } catch (err) {
+      setError(err.message || 'Registrasi gagal. Periksa data yang kamu masukkan.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -46,6 +57,8 @@ export default function Register() {
                 <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
                   type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
                   required
                   placeholder="Nama lengkap kamu"
                   className="w-full rounded-xl border border-input bg-background py-2.5 pl-10 pr-3 text-sm outline-none transition-all placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -59,6 +72,8 @@ export default function Register() {
                 <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
                   type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   required
                   placeholder="nama@email.com"
                   className="w-full rounded-xl border border-input bg-background py-2.5 pl-10 pr-3 text-sm outline-none transition-all placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
@@ -72,8 +87,10 @@ export default function Register() {
                 <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
                   type={showPass ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   required
-                  placeholder="Minimal 8 karakter"
+                  placeholder="Minimal 6 karakter"
                   className="w-full rounded-xl border border-input bg-background py-2.5 pl-10 pr-10 text-sm outline-none transition-all placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
                 />
                 <button
@@ -101,6 +118,9 @@ export default function Register() {
               {loading ? 'Membuat akun…' : 'Daftar Sekarang'}
               {!loading && <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />}
             </button>
+            {error ? (
+              <p className="mt-3 text-sm text-destructive">{error}</p>
+            ) : null}
           </form>
         </div>
       </div>
