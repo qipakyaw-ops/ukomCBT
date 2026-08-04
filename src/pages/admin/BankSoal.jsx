@@ -1,8 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
 import QuestionFormModal from '@/components/admin/QuestionFormModal';
-import { useQuestions } from '@/hooks/useQuestionStore';
-import { questionStore } from '@/lib/questionStore';
+import { useQuestionAPI } from '@/hooks/useQuestionAPI';
 import {
   LayoutDashboard, Users, Brain, BarChart3, Plus, Search, Pencil, Trash2, FileQuestion, X, Upload,
 } from 'lucide-react';
@@ -25,13 +24,17 @@ const kesulitanTone = {
 };
 
 export default function BankSoal() {
-  const questions = useQuestions();
+  const { questions, loading, error, fetchQuestions, createQuestion, updateQuestion, deleteQuestion } = useQuestionAPI();
   const [search, setSearch] = useState('');
   const [filterKategori, setFilterKategori] = useState('Semua');
   const [filterKesulitan, setFilterKesulitan] = useState('Semua');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+
+  useEffect(() => {
+    fetchQuestions();
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -46,22 +49,49 @@ export default function BankSoal() {
     });
   }, [questions, search, filterKategori, filterKesulitan]);
 
+  const handleFilterChange = () => {
+    const filters = {};
+    if (filterKategori !== 'Semua') filters.category = filterKategori;
+    if (filterKesulitan !== 'Semua') filters.difficulty = filterKesulitan;
+    if (search) filters.search = search;
+    fetchQuestions(filters);
+  };
+
+  useEffect(() => {
+    const debounceTimer = setTimeout(() => {
+      handleFilterChange();
+    }, 500);
+    return () => clearTimeout(debounceTimer);
+  }, [search, filterKategori, filterKesulitan, fetchQuestions]);
+
   const handleAdd = () => { setEditing(null); setModalOpen(true); };
   const handleEdit = (item) => { setEditing(item); setModalOpen(true); };
 
-  const handleSubmit = (data) => {
-    if (editing) {
-      questionStore.updateQuestion(editing.id, data);
-    } else {
-      questionStore.addQuestion(data);
+  const handleSubmit = async (data) => {
+    try {
+      if (editing) {
+        await updateQuestion(editing.id, data);
+      } else {
+        await createQuestion(data);
+      }
+      setModalOpen(false);
+      setEditing(null);
+      fetchQuestions();
+    } catch (err) {
+      console.error('Failed to save question:', err);
+      alert('Gagal menyimpan soal: ' + err.message);
     }
-    setModalOpen(false);
-    setEditing(null);
   };
 
-  const handleDelete = (id) => {
-    questionStore.deleteQuestion(id);
-    setConfirmDelete(null);
+  const handleDelete = async (id) => {
+    try {
+      await deleteQuestion(id);
+      setConfirmDelete(null);
+      fetchQuestions();
+    } catch (err) {
+      console.error('Failed to delete question:', err);
+      alert('Gagal menghapus soal: ' + err.message);
+    }
   };
 
   const selectCls = 'rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20';
@@ -71,7 +101,10 @@ export default function BankSoal() {
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="font-heading text-2xl font-bold tracking-tight">Bank Soal</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Kelola seluruh soal CBT UKOM. Total {questions.length} soal.</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {loading ? 'Memuat soal...' : `Kelola seluruh soal CBT UKOM. Total ${questions.length} soal.`}
+            {error && <span className="text-destructive ml-2">Error: {error}</span>}
+          </p>
         </div>
         <button onClick={handleAdd} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:shadow-md">
           <Plus className="h-4 w-4" /> Tambah Soal
@@ -88,6 +121,7 @@ export default function BankSoal() {
             placeholder="Cari pertanyaan, subkategori, atau tag…"
             className="w-full rounded-xl border border-input bg-background py-2.5 pl-10 pr-3 text-sm outline-none transition-all placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
           />
+          {loading && <div className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />}
         </div>
         <select value={filterKategori} onChange={(e) => setFilterKategori(e.target.value)} className={selectCls}>
           {KATEGORI.map((k) => <option key={k} value={k}>{k === 'Semua' ? 'Semua Kategori' : k}</option>)}
