@@ -155,6 +155,12 @@ export default function BankSoal() {
                     <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${kesulitanTone[item.tingkatKesulitan]}`}>{item.tingkatKesulitan}</span>
                     <span className="rounded-md bg-muted px-2 py-0.5 text-[11px] font-bold text-muted-foreground">Jawaban: {item.jawabanBenar}</span>
                   </div>
+                  {item.vignette && (
+                    <div className="mb-2 rounded-lg bg-primary/5 border border-primary/20 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-primary mb-1">Kasus</p>
+                      <p className="text-sm text-foreground whitespace-pre-wrap">{item.vignette}</p>
+                    </div>
+                  )}
                   <p className="text-sm font-medium leading-snug">{item.pertanyaan}</p>
                   <div className="mt-2 flex flex-wrap gap-1">
                     {item.tag.map((t) => (
