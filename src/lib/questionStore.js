@@ -154,6 +154,17 @@ export const questionStore = {
     questions = questions.filter((q) => q.id !== id);
     this._emit();
   },
+  mergeQuestions(list) {
+    const next = new Map(questions.map((q) => [q.id, q]));
+    list.forEach((item) => {
+      const normalized = normalizeQuestion(item);
+      if (!normalized.id) return;
+      next.set(normalized.id, normalized);
+    });
+    questions = [...next.values()];
+    this._emit();
+    return questions;
+  },
   addHistory(entry) {
     history = [entry, ...history];
     this._emit();

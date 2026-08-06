@@ -2,6 +2,7 @@ import express from 'express';
 import {
   getAllQuestions,
   getQuestionById,
+  getQuestionFilters,
   createQuestion,
   updateQuestion,
   deleteQuestion
@@ -12,6 +13,7 @@ import roleMiddleware from '../middlewares/role.middleware.js';
 const router = express.Router();
 
 // GET routes - accessible to authenticated users
+router.get('/filters', authMiddleware, getQuestionFilters);
 router.get('/', authMiddleware, getAllQuestions);
 router.get('/:id', authMiddleware, getQuestionById);
 

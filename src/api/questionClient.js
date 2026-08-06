@@ -89,7 +89,7 @@ class QuestionClient {
   async getQuestions(filters = {}) {
     const token = localStorage.getItem('auth_token');
     const queryParams = new URLSearchParams();
-    
+
     if (filters.category) queryParams.append('category', filters.category);
     if (filters.subcategory) queryParams.append('subcategory', filters.subcategory);
     if (filters.difficulty) queryParams.append('difficulty', filters.difficulty);
@@ -117,6 +117,24 @@ class QuestionClient {
       questions: normalizedQuestions,
       pagination: data.data.pagination
     };
+  }
+
+  async getQuestionFilters() {
+    const token = localStorage.getItem('auth_token');
+    const response = await fetch(`${API_URL}/questions/filters`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || 'Failed to get question filters');
+    }
+
+    return data.data;
   }
 
   async getQuestionById(id) {

@@ -143,6 +143,38 @@ export function createCbtSession(config) {
   return session;
 }
 
+export function createCbtSessionWithQuestions(config, questions) {
+  if (!Array.isArray(questions)) {
+    throw new Error('Data soal tidak valid untuk sesi CBT.');
+  }
+
+  if (questions.length < config.jumlahSoal) {
+    throw new Error('Jumlah soal melebihi soal yang tersedia untuk filter yang dipilih.');
+  }
+
+  const questionIds = [...questions]
+    .sort(() => Math.random() - 0.5)
+    .slice(0, config.jumlahSoal)
+    .map((question) => question.id);
+
+  const session = {
+    id: `session-${Date.now()}`,
+    type: 'practice',
+    status: 'in_progress',
+    config: { ...config },
+    questionIds,
+    answers: {},
+    flaggedQuestionIds: [],
+    currentQuestionIndex: 0,
+    startTime: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+  };
+
+  sessions = [session, ...sessions];
+  persistSessions(sessions);
+  return session;
+}
+
 export function getCbtSession(sessionId) {
   return sessions.find((session) => session.id === sessionId)
     ?? readAllStoredSessions().find((session) => session.id === sessionId && session.status === 'submitted')

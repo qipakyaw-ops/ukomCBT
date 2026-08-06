@@ -52,6 +52,23 @@ const getQuestionById = async (req, res) => {
   }
 };
 
+const getQuestionFilters = async (req, res) => {
+  try {
+    const filters = await questionService.getQuestionFilters();
+
+    res.json({
+      success: true,
+      data: filters
+    });
+  } catch (error) {
+    console.error('Get question filters error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get question filters'
+    });
+  }
+};
+
 const createQuestion = async (req, res) => {
   try {
     const questionData = req.body;
@@ -127,6 +144,7 @@ const deleteQuestion = async (req, res) => {
 export {
   getAllQuestions,
   getQuestionById,
+  getQuestionFilters,
   createQuestion,
   updateQuestion,
   deleteQuestion

@@ -69,6 +69,45 @@ class QuestionService {
     };
   }
 
+  async getQuestionFilters() {
+    const [categories, subcategories, difficulties, types] = await Promise.all([
+      prisma.question.groupBy({
+        by: ['category'],
+        orderBy: { category: 'asc' }
+      }),
+      prisma.question.groupBy({
+        by: ['subcategory'],
+        orderBy: { subcategory: 'asc' }
+      }),
+      prisma.question.groupBy({
+        by: ['difficulty'],
+        orderBy: { difficulty: 'asc' }
+      }),
+      prisma.question.groupBy({
+        by: ['type'],
+        orderBy: { type: 'asc' }
+      })
+    ]);
+
+    const categorySubcategories = await prisma.question.groupBy({
+      by: ['category', 'subcategory'],
+      orderBy: [
+        { category: 'asc' },
+        { subcategory: 'asc' }
+      ]
+    });
+
+    return {
+      categories: categories.map((item) => item.category).filter(Boolean),
+      subcategories: subcategories.map((item) => item.subcategory).filter(Boolean),
+      difficulties: difficulties.map((item) => item.difficulty).filter(Boolean),
+      types: types.map((item) => item.type).filter(Boolean),
+      categorySubcategories: categorySubcategories
+        .filter((item) => item.category && item.subcategory)
+        .map((item) => ({ category: item.category, subcategory: item.subcategory }))
+    };
+  }
+
   async getQuestionById(id) {
     const question = await prisma.question.findUnique({
       where: { id }

@@ -1,5 +1,6 @@
 import React from 'react';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
+import { useAuth } from '@/lib/AuthContext';
 import { BarChart3, Brain, ClipboardList, LayoutDashboard } from 'lucide-react';
 
 const navItems = [
@@ -10,8 +11,11 @@ const navItems = [
 ];
 
 export default function CbtPageShell({ title, description, children }) {
+  const { user } = useAuth();
+  const userName = user?.name ?? 'Mahasiswa';
+
   return (
-    <DashboardLayout role="student" userName="Andi Pratama" navItems={navItems}>
+    <DashboardLayout role="student" userName={userName} navItems={navItems}>
       <div className="mb-6">
         <h1 className="font-heading text-2xl font-bold tracking-tight">{title}</h1>
         {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}

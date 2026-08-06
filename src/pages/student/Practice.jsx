@@ -3,11 +3,17 @@ import { AlertCircle, BookOpenCheck, CheckCircle2, Play, SlidersHorizontal } fro
 import { useNavigate } from 'react-router-dom';
 import CbtPageShell from '@/components/cbt/CbtPageShell';
 import { questionStore } from '@/lib/questionStore';
-import { createCbtSession, getAvailableQuestions, getActiveCbtSession, removeCbtSession } from '@/lib/cbtSessionStore';
+import {
+  createCbtSessionWithQuestions,
+  getActiveCbtSession,
+  removeCbtSession
+} from '@/lib/cbtSessionStore';
+import questionClient from '@/api/questionClient.js';
 
 const initialConfig = {
   kategori: 'Semua',
   subkategori: 'Semua',
+  type: 'Semua',
   jumlahSoal: 5,
   tingkatKesulitan: 'Semua',
   durasi: 30,
@@ -36,40 +42,110 @@ export default function Practice() {
   const navigate = useNavigate();
   const [showResumeDialog, setShowResumeDialog] = useState(false);
   const [activeSession, setActiveSession] = useState(null);
-  const questions = questionStore.getQuestions();
   const [config, setConfig] = useState(initialConfig);
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState('');
   const [isStarting, setIsStarting] = useState(false);
+  const [availableQuestions, setAvailableQuestions] = useState(questionStore.getQuestions());
+  const [categories, setCategories] = useState(['Semua']);
+  const [subcategories, setSubcategories] = useState(['Semua']);
+  const [categorySubcategories, setCategorySubcategories] = useState([]);
+  const [difficulties, setDifficulties] = useState(['Semua']);
+  const [types, setTypes] = useState(['Semua']);
+  const [isLoadingFilters, setIsLoadingFilters] = useState(true);
+  const [isLoadingQuestions, setIsLoadingQuestions] = useState(true);
 
-  const categories = useMemo(
-    () => ['Semua', ...new Set(questions.map((question) => question.kategori))],
-    [questions]
-  );
+  const filteredSubcategories = useMemo(() => {
+    if (config.kategori === 'Semua') {
+      return subcategories;
+    }
 
-  const subcategories = useMemo(() => {
-    const filtered = config.kategori === 'Semua'
-      ? questions
-      : questions.filter((question) => question.kategori === config.kategori);
-    return ['Semua', ...new Set(filtered.map((question) => question.subkategori))];
-  }, [config.kategori, questions]);
+    const mappedSubcategories = categorySubcategories
+      .filter((item) => item.category === config.kategori)
+      .map((item) => item.subcategory)
+      .filter(Boolean);
 
-  const availableQuestions = useMemo(
-    () => getAvailableQuestions(config),
-    [config]
-  );
+    return ['Semua', ...new Set(mappedSubcategories)];
+  }, [config.kategori, categorySubcategories, subcategories]);
+
+  useEffect(() => {
+    if (!filteredSubcategories.includes(config.subkategori)) {
+      setConfig((current) => ({ ...current, subkategori: 'Semua' }));
+    }
+  }, [config.subkategori, filteredSubcategories]);
+
+  useEffect(() => {
+    const loadFilters = async () => {
+      setIsLoadingFilters(true);
+      try {
+        const filterOptions = await questionClient.getQuestionFilters();
+        setCategories(['Semua', ...filterOptions.categories]);
+        setSubcategories(['Semua', ...filterOptions.subcategories]);
+        setCategorySubcategories(filterOptions.categorySubcategories || []);
+        setDifficulties(['Semua', ...filterOptions.difficulties]);
+        setTypes(['Semua', ...filterOptions.types]);
+      } catch (err) {
+        console.error('Failed to load question filters:', err);
+        setCategories(['Semua']);
+        setSubcategories(['Semua']);
+        setDifficulties(['Semua']);
+        setTypes(['Semua']);
+      } finally {
+        setIsLoadingFilters(false);
+      }
+    };
+
+    const loadQuestions = async () => {
+      setIsLoadingQuestions(true);
+      try {
+        const result = await questionClient.getQuestions({ limit: 1000 });
+        setAvailableQuestions(result.questions);
+      } catch (err) {
+        console.error('Failed to load questions:', err);
+        setAvailableQuestions(questionStore.getQuestions());
+      } finally {
+        setIsLoadingQuestions(false);
+      }
+    };
+
+    loadFilters();
+    loadQuestions();
+  }, []);
+
+  useEffect(() => {
+    const fetchAvailableQuestions = async () => {
+      setIsLoadingQuestions(true);
+      try {
+        const filters = {};
+        if (config.kategori !== 'Semua') filters.category = config.kategori;
+        if (config.subkategori !== 'Semua') filters.subcategory = config.subkategori;
+        if (config.tingkatKesulitan !== 'Semua') filters.difficulty = config.tingkatKesulitan;
+        if (config.type !== 'Semua') filters.type = config.type;
+
+        const result = await questionClient.getQuestions({ ...filters, limit: 1000 });
+        setAvailableQuestions(result.questions);
+      } catch (err) {
+        console.error('Failed to load available questions:', err);
+        setAvailableQuestions(questionStore.getQuestions().filter((question) => {
+          const matchKategori = config.kategori === 'Semua' || question.kategori === config.kategori;
+          const matchSubkategori = config.subkategori === 'Semua' || question.subkategori === config.subkategori;
+          const matchDifficulty = config.tingkatKesulitan === 'Semua' || question.tingkatKesulitan === config.tingkatKesulitan;
+          const matchType = config.type === 'Semua' || question.type === config.type;
+          return matchKategori && matchSubkategori && matchDifficulty && matchType;
+        }));
+      } finally {
+        setIsLoadingQuestions(false);
+      }
+    };
+
+    fetchAvailableQuestions();
+  }, [config.kategori, config.subkategori, config.tingkatKesulitan, config.type]);
 
   const countOptions = useMemo(() => {
     const values = new Set(defaultCountOptions);
     if (availableQuestions.length > 0) values.add(availableQuestions.length);
     return [...values].sort((a, b) => a - b);
   }, [availableQuestions.length]);
-
-  useEffect(() => {
-    if (!subcategories.includes(config.subkategori)) {
-      setConfig((current) => ({ ...current, subkategori: 'Semua' }));
-    }
-  }, [config.subkategori, subcategories]);
 
   useEffect(() => {
     const as = getActiveCbtSession();
@@ -95,7 +171,7 @@ export default function Practice() {
 
     setIsStarting(true);
     try {
-      const session = createCbtSession(config);
+      const session = createCbtSessionWithQuestions(config, availableQuestions);
       navigate(`/student/latihan/${session.id}`);
     } catch (error) {
       setSubmitError(error.message);
@@ -165,7 +241,7 @@ export default function Practice() {
             <label className="text-sm font-medium">
               Subkategori
               <select value={config.subkategori} onChange={(event) => updateConfig('subkategori', event.target.value)} className={fieldClass('subkategori')}>
-                {subcategories.map((subcategory) => <option key={subcategory} value={subcategory}>{subcategory === 'Semua' ? 'Semua Subkategori' : subcategory}</option>)}
+                {filteredSubcategories.map((subcategory) => <option key={subcategory} value={subcategory}>{subcategory === 'Semua' ? 'Semua Subkategori' : subcategory}</option>)}
               </select>
               {errors.subkategori && <span className="mt-1 block text-xs text-destructive">{errors.subkategori}</span>}
             </label>
@@ -179,9 +255,16 @@ export default function Practice() {
             </label>
 
             <label className="text-sm font-medium">
+              Tipe Soal
+              <select value={config.type} onChange={(event) => updateConfig('type', event.target.value)} className={fieldClass('type')}>
+                {types.map((item) => <option key={item} value={item}>{item === 'Semua' ? 'Semua Tipe' : item}</option>)}
+              </select>
+            </label>
+
+            <label className="text-sm font-medium">
               Tingkat Kesulitan
               <select value={config.tingkatKesulitan} onChange={(event) => updateConfig('tingkatKesulitan', event.target.value)} className={fieldClass('tingkatKesulitan')}>
-                {['Semua', 'Mudah', 'Sedang', 'Sulit'].map((difficulty) => <option key={difficulty} value={difficulty}>{difficulty === 'Semua' ? 'Semua Tingkat' : difficulty}</option>)}
+                {difficulties.map((difficulty) => <option key={difficulty} value={difficulty}>{difficulty === 'Semua' ? 'Semua Tingkat' : difficulty}</option>)}
               </select>
               {errors.tingkatKesulitan && <span className="mt-1 block text-xs text-destructive">{errors.tingkatKesulitan}</span>}
             </label>
