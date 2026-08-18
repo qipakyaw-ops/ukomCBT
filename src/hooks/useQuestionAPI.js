@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import questionClient from '@/api/questionClient.js';
 import { questionStore } from '@/lib/questionStore.js';
 
@@ -8,8 +8,11 @@ export function useQuestionAPI() {
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [pagination, setPagination] = useState({ currentPage: 1, totalItems: 0, totalPages: 0, itemsPerPage: 20 });
 
-  const fetchQuestions = async (filters = {}) => {
+  // Stable identity so consumers can safely include fetchQuestions in effect deps
+  // without re-triggering on every render.
+  const fetchQuestions = useCallback(async (filters = {}) => {
     if (!USE_API) {
       setQuestions(questionStore.getQuestions());
       setLoading(false);
@@ -21,6 +24,8 @@ export function useQuestionAPI() {
       setError(null);
       const result = await questionClient.getQuestions(filters);
       setQuestions(result.questions);
+      // Only update pagination metadata; the active page state lives in the caller.
+      if (result.pagination) setPagination(result.pagination);
     } catch (err) {
       console.error('Failed to fetch questions:', err);
       setError(err.message);
@@ -28,7 +33,7 @@ export function useQuestionAPI() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const createQuestion = async (questionData) => {
     if (!USE_API) {
@@ -78,14 +83,11 @@ export function useQuestionAPI() {
     }
   };
 
-  useEffect(() => {
-    fetchQuestions();
-  }, []);
-
   return {
     questions,
     loading,
     error,
+    pagination,
     fetchQuestions,
     createQuestion,
     updateQuestion,

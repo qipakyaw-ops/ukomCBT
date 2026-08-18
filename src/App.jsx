@@ -15,6 +15,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import BankSoal from './pages/admin/BankSoal';
 import AdminUsers from './pages/admin/AdminUsers';
 import ImportCsv from './pages/admin/ImportCsv';
+import Laporan from './pages/admin/Laporan';
 import Practice from './pages/student/Practice';
 import ExamSimulation from './pages/student/ExamSimulation';
 import ExamSession from './pages/student/ExamSession';
@@ -75,6 +76,7 @@ const AuthenticatedApp = () => {
         <Route path="/admin/users" element={<AdminUsers />} />
         <Route path="/admin/bank-soal" element={<BankSoal />} />
         <Route path="/admin/import" element={<ImportCsv />} />
+        <Route path="/admin/laporan" element={<Laporan />} />
       </Route>
 
       <Route path="*" element={<PageNotFound />} />

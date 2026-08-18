@@ -81,6 +81,12 @@ const createQuestion = async (req, res) => {
       data: { question }
     });
   } catch (error) {
+    if (error.code === 'DUPLICATE_QUESTION') {
+      return res.status(400).json({
+        success: false,
+        message: 'Soal dengan teks/kasus yang sama sudah ada di database.'
+      });
+    }
     console.error('Create question error:', error);
     res.status(500).json({
       success: false,
@@ -141,11 +147,55 @@ const deleteQuestion = async (req, res) => {
   }
 };
 
+const importQuestions = async (req, res) => {
+  try {
+    const { rows } = req.body;
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'rows must be a non-empty array'
+      });
+    }
+    const { imported, skipped } = await questionService.importQuestions(rows);
+    res.status(201).json({
+      success: true,
+      imported,
+      skipped,
+      message: `${imported} soal di-import, ${skipped} soal duplikat dilewati`
+    });
+  } catch (error) {
+    console.error('Import questions error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to import questions'
+    });
+  }
+};
+
+const deduplicateQuestions = async (req, res) => {
+  try {
+    const result = await questionService.deduplicateQuestions();
+    res.json({
+      success: true,
+      ...result,
+      message: `${result.removed} soal duplikat dihapus`
+    });
+  } catch (error) {
+    console.error('Deduplicate questions error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to deduplicate questions'
+    });
+  }
+};
+
 export {
   getAllQuestions,
   getQuestionById,
   getQuestionFilters,
   createQuestion,
   updateQuestion,
-  deleteQuestion
+  deleteQuestion,
+  importQuestions,
+  deduplicateQuestions
 };

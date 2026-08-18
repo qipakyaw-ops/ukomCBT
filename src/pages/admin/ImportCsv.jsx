@@ -7,8 +7,9 @@ import { csvToRows } from '@/lib/parseCsv';
 import { rowToQuestion, validateQuestion } from '@/lib/validateQuestions';
 import { questionStore } from '@/lib/questionStore';
 import { useHistory } from '@/hooks/useQuestionStore';
+import questionClient from '@/api/questionClient';
 import {
-  LayoutDashboard, Users, Brain, BarChart3, Upload, CheckCircle2, Loader2, ArrowLeft,
+  LayoutDashboard, Users, Brain, BarChart3, Upload, CheckCircle2, Loader2, ArrowLeft, AlertCircle,
 } from 'lucide-react';
 
 const navItems = [
@@ -42,7 +43,7 @@ export default function ImportCsv() {
         const key = q.pertanyaan.toLowerCase();
         if (q.pertanyaan && !errors.length && !duplicate) seenSet.add(key);
         const status = errors.length ? 'invalid' : duplicate ? 'duplicate' : 'valid';
-        return { idx, q, errors, duplicate, status };
+        return { idx, q, errors, duplicate, status, row };
       });
       setPreview({ items });
     };
@@ -53,34 +54,37 @@ export default function ImportCsv() {
   const dupCount = preview?.items?.filter((i) => i.status === 'duplicate').length ?? 0;
   const invalidCount = preview?.items?.filter((i) => i.status === 'invalid').length ?? 0;
 
-  const handleImport = () => {
+  const handleImport = async () => {
     if (!validItems.length) return;
     setImporting(true);
-    setProgress(0);
-    let p = 0;
-    const timer = setInterval(() => {
-      p = Math.min(100, p + 8 + Math.random() * 14);
-      setProgress(Math.round(p));
-      if (p >= 100) {
-        clearInterval(timer);
-        const added = questionStore.addQuestions(validItems.map((i) => i.q));
-        const entry = {
-          id: `h${Date.now()}`,
-          fileName,
-          date: new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }),
-          total: preview.items.length,
-          success: added.length,
-          duplicates: dupCount,
-          invalid: invalidCount,
-          questionIds: added.map((q) => q.id),
-        };
-        questionStore.addHistory(entry);
-        setDone(entry);
-        setImporting(false);
-        setPreview(null);
-        setFileName('');
-      }
-    }, 130);
+    setProgress(20);
+    try {
+      // Send the raw parsed rows; the backend maps them to the Prisma Question
+      // schema (combining pilihan_a..e into the options JSON object).
+      const res = await questionClient.importQuestions(validItems.map((i) => i.row));
+      setProgress(100);
+      const addedCount = res.imported ?? res.count ?? validItems.length;
+      const skippedCount = res.skipped ?? 0;
+      const entry = {
+        id: `h${Date.now()}`,
+        fileName,
+        date: new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }),
+        total: preview.items.length,
+        success: addedCount,
+        duplicates: dupCount + skippedCount,
+        invalid: invalidCount,
+        questionIds: [],
+      };
+      questionStore.addHistory(entry);
+      setDone(entry);
+      setPreview(null);
+      setFileName('');
+    } catch (err) {
+      console.error('[ImportCsv] Import failed:', err);
+      setDone({ id: `h${Date.now()}`, fileName, total: preview.items.length, success: 0, duplicates: dupCount, invalid: invalidCount, questionIds: [], error: err.message });
+    } finally {
+      setImporting(false);
+    }
   };
 
   const reset = () => { setPreview(null); setFileName(''); setDone(null); };
@@ -93,13 +97,15 @@ export default function ImportCsv() {
       </div>
 
       {done ? (
-        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6 text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-600">
-            <CheckCircle2 className="h-7 w-7" />
+        <div className={`rounded-2xl border p-6 text-center ${done.error ? 'border-destructive/30 bg-destructive/5' : 'border-emerald-500/30 bg-emerald-500/5'}`}>
+          <div className={`mx-auto flex h-12 w-12 items-center justify-center rounded-full ${done.error ? 'bg-destructive/15 text-destructive' : 'bg-emerald-500/15 text-emerald-600'}`}>
+            {done.error ? <AlertCircle className="h-7 w-7" /> : <CheckCircle2 className="h-7 w-7" />}
           </div>
-          <h2 className="mt-3 font-heading text-lg font-bold">Import berhasil</h2>
+          <h2 className="mt-3 font-heading text-lg font-bold">{done.error ? 'Import gagal' : 'Import berhasil'}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            {done.success} soal ditambahkan dari <span className="font-medium">{done.fileName}</span>.
+            {done.error
+              ? done.error
+              : `${done.success} soal ditambahkan dari ${done.fileName}.`}
           </p>
           <div className="mt-4 flex justify-center gap-2">
             <button onClick={reset} className="rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm hover:shadow-md">

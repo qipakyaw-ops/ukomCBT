@@ -1,7 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
 import QuestionFormModal from '@/components/admin/QuestionFormModal';
 import { useQuestionAPI } from '@/hooks/useQuestionAPI';
+import questionClient from '@/api/questionClient';
 import {
   LayoutDashboard, Users, Brain, BarChart3, Plus, Search, Pencil, Trash2, FileQuestion, X, Upload,
 } from 'lucide-react';
@@ -24,45 +25,59 @@ const kesulitanTone = {
 };
 
 export default function BankSoal() {
-  const { questions, loading, error, fetchQuestions, createQuestion, updateQuestion, deleteQuestion } = useQuestionAPI();
+  const { questions, loading, error, pagination, fetchQuestions, createQuestion, updateQuestion, deleteQuestion } = useQuestionAPI();
   const [search, setSearch] = useState('');
   const [filterKategori, setFilterKategori] = useState('Semua');
   const [filterKesulitan, setFilterKesulitan] = useState('Semua');
+  const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const itemsPerPage = 20;
 
+  // Committed (debounced) filter values — the source of truth for fetching.
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const [appliedKategori, setAppliedKategori] = useState('Semua');
+  const [appliedKesulitan, setAppliedKesulitan] = useState('Semua');
+
+  // Fetch whenever page or committed filters change. Page is NOT reset here;
+  // it only changes when the user clicks a pagination control.
   useEffect(() => {
-    fetchQuestions();
-  }, []);
-
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return questions.filter((item) => {
-      const matchSearch = !q ||
-        item.pertanyaan.toLowerCase().includes(q) ||
-        item.subkategori.toLowerCase().includes(q) ||
-        item.tag.join(' ').toLowerCase().includes(q);
-      const matchKategori = filterKategori === 'Semua' || item.kategori === filterKategori;
-      const matchKesulitan = filterKesulitan === 'Semua' || item.tingkatKesulitan === filterKesulitan;
-      return matchSearch && matchKategori && matchKesulitan;
-    });
-  }, [questions, search, filterKategori, filterKesulitan]);
-
-  const handleFilterChange = () => {
-    const filters = {};
-    if (filterKategori !== 'Semua') filters.category = filterKategori;
-    if (filterKesulitan !== 'Semua') filters.difficulty = filterKesulitan;
-    if (search) filters.search = search;
+    const filters = { page, limit: itemsPerPage };
+    if (appliedKategori !== 'Semua') filters.category = appliedKategori;
+    if (appliedKesulitan !== 'Semua') filters.difficulty = appliedKesulitan;
+    if (appliedSearch) filters.search = appliedSearch;
     fetchQuestions(filters);
-  };
+  }, [page, appliedSearch, appliedKategori, appliedKesulitan, fetchQuestions]);
 
+  // Debounce filter input changes, then commit them AND reset to page 1.
   useEffect(() => {
     const debounceTimer = setTimeout(() => {
-      handleFilterChange();
+      setAppliedSearch(search);
+      setAppliedKategori(filterKategori);
+      setAppliedKesulitan(filterKesulitan);
+      setPage(1);
     }, 500);
     return () => clearTimeout(debounceTimer);
-  }, [search, filterKategori, filterKesulitan, fetchQuestions]);
+  }, [search, filterKategori, filterKesulitan]);
+
+  const totalPages = pagination?.totalPages ?? 1;
+  const totalItems = pagination?.totalItems ?? questions.length;
+  const currentPage = pagination?.currentPage ?? page;
+  const startItem = totalItems === 0 ? 0 : (currentPage - 1) * (pagination?.itemsPerPage ?? itemsPerPage) + 1;
+  const endItem = Math.min(currentPage * (pagination?.itemsPerPage ?? itemsPerPage), totalItems);
+
+  const goToPage = (p) => {
+    if (p < 1 || p > totalPages || p === currentPage) return;
+    setPage(p);
+  };
+
+  const pageNumbers = [];
+  const maxButtons = 5;
+  let startPage = Math.max(1, currentPage - 2);
+  let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+  if (endPage - startPage < maxButtons - 1) startPage = Math.max(1, endPage - maxButtons + 1);
+  for (let p = startPage; p <= endPage; p += 1) pageNumbers.push(p);
 
   const handleAdd = () => { setEditing(null); setModalOpen(true); };
   const handleEdit = (item) => { setEditing(item); setModalOpen(true); };
@@ -96,19 +111,46 @@ export default function BankSoal() {
 
   const selectCls = 'rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20';
 
+  const [showDedupConfirm, setShowDedupConfirm] = useState(false);
+  const [deduping, setDeduping] = useState(false);
+
+  const handleDeduplicate = async () => {
+    setDeduping(true);
+    try {
+      const res = await questionClient.deduplicateQuestions();
+      alert(`Bersihkan selesai: ${res.removed ?? 0} soal duplikat dihapus.`);
+      setShowDedupConfirm(false);
+      fetchQuestions({ page, limit: itemsPerPage });
+    } catch (err) {
+      console.error('[BankSoal] Deduplicate failed:', err);
+      alert('Gagal membersihkan duplikat: ' + err.message);
+    } finally {
+      setDeduping(false);
+    }
+  };
+
   return (
     <DashboardLayout role="admin" userName="Admin NursePrep" navItems={navItems}>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="font-heading text-2xl font-bold tracking-tight">Bank Soal</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {loading ? 'Memuat soal...' : `Kelola seluruh soal CBT UKOM. Total ${questions.length} soal.`}
+            {loading ? 'Memuat soal...' : `Kelola seluruh soal CBT UKOM. Total ${totalItems} soal.`}
             {error && <span className="text-destructive ml-2">Error: {error}</span>}
           </p>
         </div>
-        <button onClick={handleAdd} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:shadow-md">
-          <Plus className="h-4 w-4" /> Tambah Soal
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowDedupConfirm(true)}
+            disabled={deduping}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-muted disabled:opacity-50"
+          >
+            <Trash2 className="h-4 w-4" /> Bersihkan Duplikat
+          </button>
+          <button onClick={handleAdd} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:shadow-md">
+            <Plus className="h-4 w-4" /> Tambah Soal
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -130,22 +172,27 @@ export default function BankSoal() {
           {KESULITAN.map((k) => <option key={k} value={k}>{k === 'Semua' ? 'Semua Tingkat' : k}</option>)}
         </select>
         {(search || filterKategori !== 'Semua' || filterKesulitan !== 'Semua') && (
-          <button onClick={() => { setSearch(''); setFilterKategori('Semua'); setFilterKesulitan('Semua'); }} className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted">
+          <button onClick={() => { setSearch(''); setFilterKategori('Semua'); setFilterKesulitan('Semua'); setPage(1); }} className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted">
             <X className="h-4 w-4" /> Reset
           </button>
         )}
       </div>
 
       {/* List */}
-      {filtered.length === 0 ? (
+      {questions.length === 0 && !loading ? (
         <div className="rounded-2xl border border-dashed border-border py-16 text-center">
           <FileQuestion className="mx-auto h-10 w-10 text-muted-foreground/50" />
           <p className="mt-3 text-sm font-medium">Tidak ada soal ditemukan</p>
           <p className="text-xs text-muted-foreground">Coba ubah kata kunci atau filter.</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {filtered.map((item) => (
+        <div className="relative space-y-3">
+          {loading && questions.length > 0 && (
+            <div className="absolute inset-0 z-10 flex items-start justify-center rounded-2xl bg-background/60 pt-10 backdrop-blur-sm">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            </div>
+          )}
+          {questions.map((item) => (
             <div key={item.id} className="rounded-2xl border border-border bg-card p-4 transition-shadow hover:shadow-md">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0 flex-1">
@@ -182,6 +229,43 @@ export default function BankSoal() {
         </div>
       )}
 
+      {/* Pagination */}
+      {totalItems > 0 && (
+        <div className="mt-5 flex flex-col items-center justify-between gap-3 sm:flex-row">
+          <p className="text-sm text-muted-foreground">
+            Menampilkan <span className="font-semibold text-foreground">{startItem} - {endItem}</span> dari {totalItems} soal
+          </p>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); goToPage(currentPage - 1); }}
+              disabled={currentPage <= 1}
+              className="rounded-lg border border-border px-3 py-2 text-sm font-semibold transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Sebelumnya
+            </button>
+            {pageNumbers.map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={(e) => { e.preventDefault(); goToPage(p); }}
+                className={`h-9 w-9 rounded-lg text-sm font-semibold transition-colors ${p === currentPage ? 'bg-primary text-primary-foreground' : 'border border-border hover:bg-muted'}`}
+              >
+                {p}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); goToPage(currentPage + 1); }}
+              disabled={currentPage >= totalPages}
+              className="rounded-lg border border-border px-3 py-2 text-sm font-semibold transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Selanjutnya
+            </button>
+          </div>
+        </div>
+      )}
+
       <QuestionFormModal open={modalOpen} initial={editing} onClose={() => { setModalOpen(false); setEditing(null); }} onSubmit={handleSubmit} />
 
       {/* Delete confirm */}
@@ -198,6 +282,28 @@ export default function BankSoal() {
             <div className="mt-4 flex gap-2">
               <button onClick={() => setConfirmDelete(null)} className="flex-1 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-muted">Batal</button>
               <button onClick={() => handleDelete(confirmDelete.id)} className="flex-1 rounded-xl bg-destructive px-4 py-2.5 text-sm font-semibold text-destructive-foreground transition-all hover:opacity-90">Hapus</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Deduplicate confirm */}
+      {showDedupConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-foreground/40 backdrop-blur-sm" onClick={() => setShowDedupConfirm(false)} />
+          <div className="relative w-full max-w-sm rounded-2xl border border-border bg-card p-5 text-center shadow-2xl">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-500/10 text-amber-600">
+              <Trash2 className="h-6 w-6" />
+            </div>
+            <h3 className="mt-3 font-heading text-lg font-bold">Bersihkan soal duplikat?</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Soal dengan teks dan kasus yang sama akan dihapus, menyisakan versi paling lama.
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button onClick={() => setShowDedupConfirm(false)} disabled={deduping} className="flex-1 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-muted disabled:opacity-50">Batal</button>
+              <button onClick={handleDeduplicate} disabled={deduping} className="flex-1 rounded-xl bg-destructive px-4 py-2.5 text-sm font-semibold text-destructive-foreground transition-all hover:opacity-90 disabled:opacity-50">
+                {deduping ? 'Membersihkan...' : 'Bersihkan'}
+              </button>
             </div>
           </div>
         </div>

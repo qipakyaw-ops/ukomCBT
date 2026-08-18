@@ -217,6 +217,39 @@ class QuestionClient {
 
     return data;
   }
+
+  // Bulk-import parsed CSV rows into the database (admin only).
+  async importQuestions(rows) {
+    const token = localStorage.getItem('auth_token');
+    const response = await fetch(`${API_URL}/questions/import`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ rows }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Failed to import questions');
+    return data;
+  }
+
+  // Remove duplicate questions from the database (admin only).
+  async deduplicateQuestions() {
+    const token = localStorage.getItem('auth_token');
+    const response = await fetch(`${API_URL}/questions/deduplicate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Failed to deduplicate questions');
+    return data;
+  }
 }
 
 export default new QuestionClient();
