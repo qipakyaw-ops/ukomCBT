@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Activity, LogOut, Menu, Stethoscope, LayoutDashboard } from 'lucide-react';
+import { Activity, Book, LogOut, Menu, Stethoscope, LayoutDashboard } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/AuthContext';
 

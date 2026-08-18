@@ -13,8 +13,10 @@ import Register from './pages/Register';
 import StudentDashboard from './pages/StudentDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import BankSoal from './pages/admin/BankSoal';
+import AdminUsers from './pages/admin/AdminUsers';
 import ImportCsv from './pages/admin/ImportCsv';
 import Practice from './pages/student/Practice';
+import ExamSimulation from './pages/student/ExamSimulation';
 import ExamSession from './pages/student/ExamSession';
 import ExamResult from './pages/student/ExamResult';
 import ExamHistory from './pages/student/ExamHistory';
@@ -60,6 +62,8 @@ const AuthenticatedApp = () => {
         <Route path="/student/latihan" element={<Practice />} />
         <Route path="/student/latihan/:sessionId" element={<ExamSession />} />
         <Route path="/student/hasil/:sessionId" element={<ExamResult />} />
+        <Route path="/student/simulasi" element={<ExamSimulation />} />
+        <Route path="/student/simulasi/:sessionId" element={<ExamSession />} />
         <Route path="/student/riwayat" element={<ExamHistory />} />
         <Route path="/student/performa" element={<Performance />} />
         <Route path="/student/bookmark" element={<Bookmarks />} />
@@ -68,6 +72,7 @@ const AuthenticatedApp = () => {
       {/* Admin routes - protected and role-restricted */}
       <Route element={<ProtectedRoute allowedRoles={[ 'admin' ]} unauthenticatedElement={<Navigate to="/login" replace />} /> }>
         <Route path="/admin/dashboard" element={<AdminDashboard />} />
+        <Route path="/admin/users" element={<AdminUsers />} />
         <Route path="/admin/bank-soal" element={<BankSoal />} />
         <Route path="/admin/import" element={<ImportCsv />} />
       </Route>

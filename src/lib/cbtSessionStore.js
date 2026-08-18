@@ -1,4 +1,7 @@
 import { questionStore } from '@/lib/questionStore';
+import cbtSessionClient from '@/api/cbtSessionClient.js';
+import questionClient from '@/api/questionClient.js';
+import { getBookmarkIds } from '@/lib/bookmarkStore';
 
 const STORAGE_KEY = 'nurseprep_cbt_sessions';
 
@@ -10,239 +13,116 @@ function hasSessionTimeRemaining(session) {
 }
 
 function readAllStoredSessions() {
-  if (typeof window === 'undefined') return [];
-
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '[]');
-    return Array.isArray(stored) ? stored : [];
-  } catch {
-    return [];
-  }
-}
-
-function readStoredSessions() {
-  return readAllStoredSessions().filter((session) => session.status === 'in_progress' && hasSessionTimeRemaining(session));
-}
-
-function persistSessions(nextSessions) {
-  if (typeof window === 'undefined') return;
-
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSessions));
-  } catch {
-    // Local Storage may be unavailable or full; the in-memory session remains usable.
-  }
-}
-
-const BOOKMARK_STORAGE_KEY = 'student_bookmarks';
-
-function readAllBookmarks() {
   if (typeof window === 'undefined') return {};
   try {
-    const stored = JSON.parse(window.localStorage.getItem(BOOKMARK_STORAGE_KEY) ?? '{}');
+    const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '{}');
     return typeof stored === 'object' && stored !== null ? stored : {};
-  } catch {
-    return {};
-  }
+  } catch { return {}; }
 }
 
-function persistBookmarks(bookmarksByUser) {
-  if (typeof window === 'undefined') return;
+function readStoredSessions(userId) {
+  if (!userId) return [];
+  return (readAllStoredSessions()[userId] ?? []).filter((session) => session.status === 'in_progress' && hasSessionTimeRemaining(session));
+}
+
+function persistSessions(userId, nextSessions) {
+  if (typeof window === 'undefined' || !userId) return;
   try {
-    window.localStorage.setItem(BOOKMARK_STORAGE_KEY, JSON.stringify(bookmarksByUser));
-  } catch {
-    // Ignore localStorage errors.
-  }
+    const all = readAllStoredSessions();
+    all[userId] = nextSessions;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+  } catch {}
 }
 
-function getBookmarks(userId) {
-  if (!userId || typeof window === 'undefined') return [];
-  const allBookmarks = readAllBookmarks();
-  const bookmarks = allBookmarks[userId];
-  return Array.isArray(bookmarks) ? bookmarks : [];
+export function getActiveCbtSession(userId, sessionType = 'practice') {
+  if (!userId) return null;
+  const sessions = readStoredSessions(userId);
+  // ponytail: legacy sessions without type default to 'practice', do not mutate stored data
+  return sessions.find((s) => (s.type ?? 'practice') === sessionType) ?? null;
 }
 
-function setBookmarks(userId, nextIds) {
-  if (!userId || typeof window === 'undefined') return [];
-  const allBookmarks = readAllBookmarks();
-  const next = { ...allBookmarks, [userId]: [...new Set(nextIds)] };
-  persistBookmarks(next);
+export function getCbtSession(sessionId, userId) {
+  if (!userId) return null;
+  const allSessions = readAllStoredSessions()[userId] ?? [];
+  return allSessions.find(s => s.id === sessionId) ?? null;
+}
+
+export async function getSubmittedCbtSessions(userId) {
+  if (!userId) return [];
   try {
-    window.dispatchEvent(new CustomEvent('cbtBookmarksUpdated', { detail: { userId } }));
-  } catch {
-    // ignore
+    const result = await cbtSessionClient.getSubmittedSessions();
+    // ponytail: always return array, guard against non-array API responses
+    return Array.isArray(result) ? result : Array.isArray(result?.data) ? result.data : [];
+  } catch (error) {
+    console.error('[CBT] Failed to fetch submitted sessions from backend:', error);
+    // Fallback: read submitted sessions from localStorage (legacy fallback)
+    const storedSessions = readAllStoredSessions()[userId] ?? [];
+    return storedSessions
+      .filter((session) => session.status === 'submitted')
+      .sort((a, b) => new Date(b.submittedAt ?? b.createdAt).getTime() - new Date(a.submittedAt ?? a.createdAt).getTime());
   }
-  return next[userId];
 }
 
-export function toggleBookmark(userId, questionId) {
-  if (!userId || !questionId) return [];
-  const current = getBookmarks(userId);
-  const nextIds = current.includes(questionId)
-    ? current.filter((id) => id !== questionId)
-    : [...current, questionId];
-  return setBookmarks(userId, nextIds);
-}
-
-export function removeBookmark(userId, questionId) {
-  if (!userId || !questionId) return [];
-  const current = getBookmarks(userId);
-  const nextIds = current.filter((id) => id !== questionId);
-  return setBookmarks(userId, nextIds);
-}
-
-export function isBookmarked(userId, questionId) {
-  if (!userId || !questionId) return false;
-  return getBookmarks(userId).includes(questionId);
-}
-
-export function getBookmarksForUser(userId) {
-  return getBookmarks(userId);
-}
-
-let sessions = readStoredSessions();
-
-function matchesConfig(question, config) {
-  const matchesKategori = config.kategori === 'Semua' || question.kategori === config.kategori;
-  const matchesSubkategori = config.subkategori === 'Semua' || question.subkategori === config.subkategori;
-  const matchesDifficulty = config.tingkatKesulitan === 'Semua' || question.tingkatKesulitan === config.tingkatKesulitan;
-  return matchesKategori && matchesSubkategori && matchesDifficulty;
-}
-
-export function getAvailableQuestions(config) {
-  return questionStore.getQuestions().filter((question) => matchesConfig(question, config));
-}
-
-export function createCbtSession(config) {
-  const availableQuestions = getAvailableQuestions(config);
-
-  if (availableQuestions.length < config.jumlahSoal) {
-    throw new Error('Jumlah soal melebihi soal yang tersedia untuk filter yang dipilih.');
-  }
-
-  const questionIds = [...availableQuestions]
-    .sort(() => Math.random() - 0.5)
-    .slice(0, config.jumlahSoal)
-    .map((question) => question.id);
-
+export async function createCbtSessionWithQuestions(userId, config, questions, sessionType = 'practice') {
+  if (!userId || !Array.isArray(questions)) throw new Error('Data tidak valid.');
+  const questionIds = [...questions].sort(() => Math.random() - 0.5).slice(0, config.jumlahSoal).map(q => q.id);
   const session = {
     id: `session-${Date.now()}`,
-    type: 'practice',
+    userId,
+    type: sessionType,
     status: 'in_progress',
     config: { ...config },
     questionIds,
     answers: {},
-    flaggedQuestionIds: [],
     currentQuestionIndex: 0,
     startTime: new Date().toISOString(),
     createdAt: new Date().toISOString(),
   };
-
-  sessions = [session, ...sessions];
-  persistSessions(sessions);
-  return session;
-}
-
-export function createCbtSessionWithQuestions(config, questions) {
-  if (!Array.isArray(questions)) {
-    throw new Error('Data soal tidak valid untuk sesi CBT.');
-  }
-
-  if (questions.length < config.jumlahSoal) {
-    throw new Error('Jumlah soal melebihi soal yang tersedia untuk filter yang dipilih.');
-  }
-
-  const questionIds = [...questions]
-    .sort(() => Math.random() - 0.5)
-    .slice(0, config.jumlahSoal)
-    .map((question) => question.id);
-
-  const session = {
-    id: `session-${Date.now()}`,
-    type: 'practice',
-    status: 'in_progress',
-    config: { ...config },
-    questionIds,
-    answers: {},
-    flaggedQuestionIds: [],
-    currentQuestionIndex: 0,
-    startTime: new Date().toISOString(),
-    createdAt: new Date().toISOString(),
-  };
-
-  sessions = [session, ...sessions];
-  persistSessions(sessions);
-  return session;
-}
-
-export function getCbtSession(sessionId) {
-  return sessions.find((session) => session.id === sessionId)
-    ?? readAllStoredSessions().find((session) => session.id === sessionId && session.status === 'submitted')
-    ?? null;
-}
-
-export function getSubmittedCbtSessions() {
-  const storedSessions = readAllStoredSessions();
-  const submittedSessions = [...sessions, ...storedSessions]
-    .filter((session) => session.status === 'submitted')
-    .reduce((uniqueSessions, session) => {
-      if (!uniqueSessions.some((item) => item.id === session.id)) uniqueSessions.push(session);
-      return uniqueSessions;
-    }, []);
-
-  return submittedSessions.sort((a, b) => new Date(b.submittedAt ?? b.createdAt).getTime() - new Date(a.submittedAt ?? a.createdAt).getTime());
-}
-
-export function updateCbtSession(sessionId, updates) {
-  let updatedSession = null;
-  sessions = sessions.map((session) => {
-    if (session.id !== sessionId) return session;
-    updatedSession = { ...session, ...updates };
-    return updatedSession;
-  });
-  if (updatedSession) persistSessions(sessions);
-  // Emit a DOM event so other components can react to session updates (no new store created)
   try {
-    if (typeof window !== 'undefined' && updatedSession) {
-      window.dispatchEvent(new CustomEvent('cbtSessionUpdated', { detail: updatedSession }));
-    }
-  } catch (e) {
-    // ignore
+    const backendSession = await cbtSessionClient.createSession(session);
+    const sessions = readAllStoredSessions()[userId] ?? [];
+    persistSessions(userId, [backendSession, ...sessions]);
+    return backendSession;
+  } catch {
+    const sessions = readAllStoredSessions()[userId] ?? [];
+    persistSessions(userId, [session, ...sessions]);
+    return session;
   }
-  return updatedSession;
 }
 
-export function removeCbtSession(sessionId) {
-  const exists = sessions.some((s) => s.id === sessionId);
-  if (!exists) return false;
-  sessions = sessions.filter((s) => s.id !== sessionId);
-  persistSessions(sessions);
+export async function updateCbtSession(sessionId, userId, updates) {
+  if (!userId) return null;
+  const all = readAllStoredSessions();
+  const sessions = (all[userId] ?? []).map(s => s.id === sessionId ? { ...s, ...updates } : s);
+  persistSessions(userId, sessions);
   try {
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('cbtSessionRemoved', { detail: { id: sessionId } }));
-    }
-  } catch (e) {}
+    await cbtSessionClient.updateSession(sessionId, updates);
+  } catch (error) {
+    console.error('[CBT SYNC] Failed to sync session:', error);
+  }
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('cbtSessionUpdated', { detail: sessions.find(s => s.id === sessionId) }));
+  return sessions.find(s => s.id === sessionId);
+}
+
+export function removeCbtSession(sessionId, userId) {
+  if (!userId) return false;
+  persistSessions(userId, (readAllStoredSessions()[userId] ?? []).filter(s => s.id !== sessionId));
   return true;
 }
 
-export function getActiveCbtSession() {
-  // Prefer in-memory sessions first
-  const inMemory = sessions.find((s) => s.status === 'in_progress');
-  if (inMemory) return inMemory;
-  // Fallback to any stored in-progress session with remaining time
-  const stored = readAllStoredSessions().find((s) => s.status === 'in_progress');
-  if (stored) return stored;
-  // If none, return the most recent submitted session
-  const all = [...sessions, ...readAllStoredSessions()];
-  if (all.length === 0) return null;
-  return all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
-}
-
-export function submitCbtSession(sessionId, userId) {
-  const session = getCbtSession(sessionId);
+export async function submitCbtSession(sessionId, userId) {
+  const session = getCbtSession(sessionId, userId);
   if (!session || session.status !== 'in_progress') return null;
 
-  const questionsById = new Map(questionStore.getQuestions().map((question) => [question.id, question]));
+  // ponytail: score against API/DB-backed questions that the session was built from, not the local seed store
+  let questionsById = new Map();
+  try {
+    const { questions } = await questionClient.getQuestions({ limit: 1000 });
+    questionsById = new Map(questions.map((question) => [question.id, question]));
+  } catch (error) {
+    console.error('[CBT] Failed to load questions for scoring, falling back to local store:', error);
+    questionsById = new Map(questionStore.getQuestions().map((question) => [question.id, question]));
+  }
   const answers = session.answers ?? {};
   let correctCount = 0;
   let incorrectCount = 0;
@@ -251,29 +131,28 @@ export function submitCbtSession(sessionId, userId) {
   session.questionIds.forEach((questionId) => {
     const question = questionsById.get(questionId);
     const answer = answers[questionId];
-
-    if (!answer) {
-      unansweredCount += 1;
-    } else if (question && answer === question.jawabanBenar) {
-      correctCount += 1;
-    } else {
-      incorrectCount += 1;
-    }
+    if (!answer) unansweredCount += 1;
+    else if (question && answer === question.jawabanBenar) correctCount += 1;
+    else incorrectCount += 1;
   });
 
-  const bookmarkCount = userId ? getBookmarksForUser(userId).length : 0;
-
-  return updateCbtSession(sessionId, {
+  const bookmarkCount = userId ? getBookmarkIds(userId).length : 0;
+  // ponytail: satu PUT submit membawa answers terbaru + status + submittedAt
+  const updated = await updateCbtSession(sessionId, userId, {
     status: 'submitted',
     submittedAt: new Date().toISOString(),
+    answers: session.answers ?? {},
     result: {
       totalQuestions: session.questionIds.length,
       answeredCount: correctCount + incorrectCount,
-      unansweredCount,
-      correctCount,
-      incorrectCount,
+      unansweredCount, correctCount, incorrectCount,
       bookmarkedCount: bookmarkCount,
       flaggedCount: (session.flaggedQuestionIds ?? []).length,
     },
   });
+  // ponytail: submitted sessions no longer kept in localStorage — moved to backend
+  removeCbtSession(sessionId, userId);
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('cbtSessionsRefreshed'));
+  return updated;
 }
+

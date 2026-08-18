@@ -1,14 +1,26 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
 import { getSubmittedCbtSessions } from '@/lib/cbtSessionStore';
+import { useAuth } from '@/lib/AuthContext';
+import questionClient from '@/api/questionClient';
 
-function getSessionPercentage(session) {
-  const correct = session.result?.correctCount ?? 0;
-  const total = session.result?.totalQuestions ?? session.questionIds?.length ?? 0;
-  if (total === 0) return 0;
-  return Math.round((correct / total) * 100);
+function getSessionPercentage(session, questionById) {
+  const answers = session.answers ?? {};
+  let correctCount = 0;
+  let total = 0;
+
+  session.questionIds.forEach((questionId) => {
+    const answer = answers[questionId];
+    const question = questionById.get(questionId);
+    if (question) {
+      total++;
+      if (answer === question.correctAnswer) correctCount++;
+    }
+  });
+
+  return total > 0 ? Math.round((correctCount / total) * 100) : 0;
 }
 
 function formatDate(dateValue) {
@@ -28,17 +40,64 @@ function CustomTooltip({ active, payload, label }) {
   return null;
 }
 
+const TIME_FILTERS = [
+  { key: 'all', label: 'Semua Waktu' },
+  { key: '7d', label: '7 Hari Terakhir' },
+  { key: '30d', label: '30 Hari Terakhir' },
+];
+
+function matchesTimeRange(session, timeFilter) {
+  if (timeFilter === 'all') return true;
+  const ts = new Date(session.submittedAt ?? session.createdAt).getTime();
+  const day = 24 * 60 * 60 * 1000;
+  const cutoff = timeFilter === '7d' ? 7 * day : 30 * day;
+  return ts >= Date.now() - cutoff;
+}
+
 export default function ProgressChart() {
-  const sessions = useMemo(() => getSubmittedCbtSessions(), []);
+  const { user } = useAuth();
+  const [sessions, setSessions] = useState([]);
+  const [timeFilter, setTimeFilter] = useState('all');
+  const [questionById, setQuestionById] = useState(() => new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!user?.id) {
+        setSessions([]);
+        return;
+      }
+      try {
+        const data = await getSubmittedCbtSessions(user.id);
+        if (!cancelled) setSessions(data);
+      } catch {
+        if (!cancelled) setSessions([]);
+      }
+    };
+    load();
+    const refresh = () => load();
+    window.addEventListener('cbtSessionsRefreshed', refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('cbtSessionsRefreshed', refresh);
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    questionClient.getQuestions({ limit: 1000 })
+      .then((res) => setQuestionById(new Map(res.questions.map((q) => [q.id, q]))))
+      .catch(() => {});
+  }, []);
 
   const chartData = useMemo(() => {
-    return [...sessions]
+    return sessions
+      .filter((session) => matchesTimeRange(session, timeFilter))
       .sort((a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime())
       .map((session) => ({
         tanggal: formatDate(session.submittedAt),
-        nilai: getSessionPercentage(session),
+        nilai: getSessionPercentage(session, questionById),
       }));
-  }, [sessions]);
+  }, [sessions, timeFilter, questionById]);
 
   const deltaText = useMemo(() => {
     if (chartData.length < 2) return 'Tambahkan lebih banyak sesi untuk melihat tren.';
@@ -48,19 +107,28 @@ export default function ProgressChart() {
 
   return (
     <div className="rounded-2xl border border-border bg-card p-5">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h3 className="font-heading text-base font-bold">Grafik Perkembangan</h3>
           <p className="text-xs text-muted-foreground">Perkembangan skor dari sesi yang disubmit</p>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-600">
-          {deltaText}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {TIME_FILTERS.map((f) => (
+              <button key={f.key} type="button" onClick={() => setTimeFilter(f.key)} className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${timeFilter === f.key ? 'bg-primary text-primary-foreground' : 'border border-border text-muted-foreground hover:bg-muted'}`}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-600">
+            {deltaText}
+          </span>
+        </div>
       </div>
       <div className="h-64 w-full">
         {chartData.length === 0 ? (
           <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border bg-muted text-sm text-muted-foreground">
-            Belum ada sesi yang disubmit.
+            {sessions.length === 0 ? 'Belum ada sesi yang disubmit.' : 'Tidak ada sesi dalam rentang waktu ini.'}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">

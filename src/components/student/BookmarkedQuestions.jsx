@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Bookmark, ArrowUpRight } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
-import { getBookmarksForUser } from '@/lib/cbtSessionStore';
-import { questionStore } from '@/lib/questionStore';
+import { loadBookmarks, getBookmarkIds } from '@/lib/bookmarkStore';
+import questionClient from '@/api/questionClient';
 
 const levelTone = {
   Mudah: 'bg-emerald-500/10 text-emerald-600',
@@ -13,20 +13,34 @@ const levelTone = {
 
 export default function BookmarkedQuestions() {
   const { user } = useAuth();
-  const [bookmarkIds, setBookmarkIds] = useState(() => getBookmarksForUser(user?.id));
+  const [bookmarkIds, setBookmarkIds] = useState(() => getBookmarkIds(user?.id));
+  const [questionsById, setQuestionsById] = useState(() => new Map());
 
   useEffect(() => {
     if (!user?.id) {
       setBookmarkIds([]);
       return undefined;
     }
-    const updateBookmarks = () => setBookmarkIds(getBookmarksForUser(user.id));
-    updateBookmarks();
+    let cancelled = false;
+    const load = async () => {
+      const ids = await loadBookmarks(user.id);
+      if (!cancelled) setBookmarkIds(ids);
+    };
+    load();
+    const updateBookmarks = () => setBookmarkIds(getBookmarkIds(user.id));
     window.addEventListener('cbtBookmarksUpdated', updateBookmarks);
-    return () => window.removeEventListener('cbtBookmarksUpdated', updateBookmarks);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('cbtBookmarksUpdated', updateBookmarks);
+    };
   }, [user?.id]);
 
-  const questionsById = new Map(questionStore.getQuestions().map((q) => [q.id, q]));
+  useEffect(() => {
+    questionClient.getQuestions({ limit: 1000 })
+      .then((res) => setQuestionsById(new Map(res.questions.map((q) => [q.id, q]))))
+      .catch(() => {});
+  }, []);
+
   const items = bookmarkIds.map((id) => questionsById.get(id)).filter(Boolean).slice(0, 4);
 
   if (items.length === 0) {
@@ -64,21 +78,24 @@ export default function BookmarkedQuestions() {
         </Link>
       </div>
       <div className="space-y-2.5">
-        {items.map((q) => (
+        {items.map((q) => {
+          const correctText = q.pilihan?.[q.correctAnswer] || q.options?.find((o) => o.id === q.correctAnswer)?.text || '';
+          return (
           <div key={q.id} className="group flex items-start gap-3 rounded-xl border border-border p-3 transition-all hover:border-primary/40 hover:bg-accent">
             <Bookmark className="mt-0.5 h-4 w-4 shrink-0 fill-amber-400 text-amber-500" />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium leading-snug">{q.pertanyaan}</p>
-              <div className="mt-1.5 flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">{q.kategori}</span>
-                <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${levelTone[q.tingkatKesulitan]}`}>
-                  {q.tingkatKesulitan}
-                </span>
-              </div>
+              <p className="text-xs font-semibold text-primary">{q.kategori}</p>
+              {q.vignette?.trim() && (
+                <p className="mt-0.5 rounded-lg bg-muted/40 px-2.5 py-1.5 text-xs italic leading-relaxed text-muted-foreground">{q.vignette}</p>
+              )}
+              <p className="mt-1 text-sm font-medium leading-snug">{q.pertanyaan}</p>
+              <p className="mt-1 text-xs"><span className="font-semibold text-emerald-700">Jawaban benar: </span><span className="text-emerald-700">{q.correctAnswer}. {correctText}</span></p>
+              {q.pembahasan && <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{q.pembahasan}</p>}
             </div>
             <ArrowUpRight className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-primary" />
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

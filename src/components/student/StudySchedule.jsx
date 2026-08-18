@@ -1,76 +1,71 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { CalendarDays } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { CalendarDays, Sparkles } from 'lucide-react';
+import { useAuth } from '@/lib/AuthContext';
 import { getSubmittedCbtSessions } from '@/lib/cbtSessionStore';
+import { getTargets, loadTargets } from '@/lib/userSettingsStore';
+import questionClient from '@/api/questionClient';
+import {
+  getSchedule,
+  loadSchedule,
+  saveSchedule,
+  buildRecommendedSchedule,
+  buildInsightNote,
+  normalizeSchedule,
+} from '@/lib/studyScheduleStore';
 
 const DAYS = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
-const STORAGE_KEY = 'study_schedule_plan';
-
-const DEFAULT_SCHEDULE = [
-  { day: 'Sen', items: ['Medikal Bedah — 60 mnt', 'Bank Soal — 30 soal'] },
-  { day: 'Sel', items: ['Farmakologi — 45 mnt'] },
-  { day: 'Rab', items: ['Simulasi CBT — 90 mnt'] },
-  { day: 'Kam', items: ['Keperawatan Anak — 60 mnt'] },
-  { day: 'Jum', items: ['Maternitas — 45 mnt', 'Pembahasan'] },
-  { day: 'Sab', items: ['Simulasi CBT — 90 mnt'] },
-  { day: 'Min', items: ['Review Bookmark'] },
-];
 
 function getTodayLabel() {
-  const dayIndex = new Date().getDay();
   const mapping = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
-  return mapping[dayIndex];
-}
-
-function loadSchedule() {
-  if (typeof window === 'undefined') return DEFAULT_SCHEDULE;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_SCHEDULE;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return DEFAULT_SCHEDULE;
-    return DAYS.map((day) => ({
-      day,
-      items: Array.isArray(parsed.find((entry) => entry.day === day)?.items)
-        ? parsed.find((entry) => entry.day === day).items
-        : DEFAULT_SCHEDULE.find((entry) => entry.day === day)?.items ?? [],
-    }));
-  } catch {
-    return DEFAULT_SCHEDULE;
-  }
-}
-
-function saveSchedule(schedule) {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(schedule));
-  } catch {}
+  return mapping[new Date().getDay()];
 }
 
 export default function StudySchedule() {
-  const [schedule, setSchedule] = useState(DEFAULT_SCHEDULE);
+  const { user } = useAuth();
+  const [schedule, setSchedule] = useState(() => getSchedule());
   const [selectedDay, setSelectedDay] = useState(getTodayLabel());
   const [editorValue, setEditorValue] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [saveStatus, setSaveStatus] = useState(null);
+  const [insightNote, setInsightNote] = useState(null);
+
+  const refreshInsight = async (sessions = null) => {
+    if (!user?.id) return;
+    try {
+      const [loadedSessions, targets] = await Promise.all([
+        sessions ?? getSubmittedCbtSessions(user.id),
+        loadTargets(user.id),
+      ]);
+      const { questions } = await questionClient.getQuestions({ limit: 1000 });
+      const questionById = new Map(questions.map((q) => [q.id, q]));
+      setInsightNote(buildInsightNote(loadedSessions, questionById, targets?.scoreGoal ?? 85));
+    } catch (error) {
+      console.error('[StudySchedule] Insight failed:', error);
+    }
+  };
 
   useEffect(() => {
-    const loaded = loadSchedule();
-    setSchedule(loaded);
-    setSelectedDay(getTodayLabel());
-  }, []);
+    if (!user?.id) return undefined;
+    let cancelled = false;
+    loadSchedule(user.id).then((sched) => {
+      if (cancelled) return;
+      setSchedule(sched);
+    });
+    refreshInsight();
+    const onSessions = () => refreshInsight();
+    window.addEventListener('cbtSessionsRefreshed', onSessions);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('cbtSessionsRefreshed', onSessions);
+    };
+  }, [user?.id]);
 
   useEffect(() => {
     const current = schedule.find((entry) => entry.day === selectedDay);
     setEditorValue(current?.items.join('\n') ?? '');
   }, [schedule, selectedDay]);
 
-  const sessions = useMemo(() => getSubmittedCbtSessions(), []);
-  const completedThisWeek = sessions.filter((session) => {
-    const submittedDate = new Date(session.submittedAt);
-    const now = new Date();
-    const diff = (now.getTime() - submittedDate.getTime()) / (1000 * 60 * 60 * 24);
-    return diff <= 7;
-  }).length;
-
-  const handleSave = () => {
+  const handleSave = async () => {
     const nextSchedule = schedule.map((entry) => {
       if (entry.day !== selectedDay) return entry;
       return {
@@ -79,20 +74,77 @@ export default function StudySchedule() {
       };
     });
     setSchedule(nextSchedule);
-    saveSchedule(nextSchedule);
+    setSaveStatus('saving');
+    try {
+      const saved = await saveSchedule(user?.id, nextSchedule);
+      setSchedule(saved);
+      setSaveStatus('saved');
+    } catch {
+      setSaveStatus('error');
+    }
+  };
+
+  const handleGenerate = async () => {
+    if (!user?.id) return;
+    setIsGenerating(true);
+    setSaveStatus(null);
+    try {
+      const [sessions, targets] = await Promise.all([
+        getSubmittedCbtSessions(user.id),
+        loadTargets(user.id),
+      ]);
+      const { questions } = await questionClient.getQuestions({ limit: 1000 });
+      const questionById = new Map(questions.map((q) => [q.id, q]));
+      const recommended = buildRecommendedSchedule(
+        sessions,
+        questionById,
+        targets?.sessionGoal ?? 8,
+        targets?.scoreGoal ?? 85,
+      );
+      const saved = await saveSchedule(user.id, recommended);
+      setSchedule(saved);
+      await refreshInsight(sessions);
+      setSaveStatus('generated');
+    } catch (error) {
+      console.error('[StudySchedule] Generate failed:', error);
+      setSaveStatus('error');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (
     <div className="rounded-2xl border border-border bg-card p-5">
-      <div className="mb-4 flex items-center gap-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-chart-2/10 text-chart-2">
-          <CalendarDays className="h-4 w-4" />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-chart-2/10 text-chart-2">
+            <CalendarDays className="h-4 w-4" />
+          </div>
+          <div>
+            <h3 className="font-heading text-base font-bold">Jadwal Belajar</h3>
+            <p className="text-xs text-muted-foreground">Rekomendasi AI personal berdasarkan performa kamu</p>
+          </div>
         </div>
-        <div>
-          <h3 className="font-heading text-base font-bold">Jadwal Belajar</h3>
-          <p className="text-xs text-muted-foreground">{completedThisWeek} sesi selesai minggu ini</p>
-        </div>
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={isGenerating}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          {isGenerating ? 'Menyusun...' : 'Generate Rekomendasi AI'}
+        </button>
       </div>
+      {saveStatus === 'generated' && <p className="mb-3 text-xs font-medium text-emerald-600">Rekomendasi AI telah dibuat dan disimpan.</p>}
+      {saveStatus === 'saved' && <p className="mb-3 text-xs font-medium text-emerald-600">Jadwal tersimpan.</p>}
+      {saveStatus === 'error' && <p className="mb-3 text-xs font-medium text-destructive">Gagal menyimpan jadwal.</p>}
+
+      {insightNote && (
+        <div className="mb-4 flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3.5 text-sm leading-relaxed">
+          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <p className="text-muted-foreground"><span className="font-semibold text-foreground">Insight AI:</span> {insightNote}</p>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 lg:grid-cols-7">
         {DAYS.map((day) => {
@@ -137,7 +189,8 @@ export default function StudySchedule() {
           <button
             type="button"
             onClick={handleSave}
-            className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition hover:bg-primary/90"
+            disabled={saveStatus === 'saving'}
+            className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60"
           >
             Simpan
           </button>

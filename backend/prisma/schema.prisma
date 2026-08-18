@@ -8,33 +8,92 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(uuid())
+  id           String        @id @default(uuid())
   name         String
-  email        String   @unique
-  passwordHash String   @map("password_hash")
-  role         String   @default("student")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  email        String        @unique
+  passwordHash String        @map("password_hash")
+  role         String        @default("student")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  cbtBookmarks CbtBookmark[]
+  cbtSessions  CbtSession[]
+  settings     UserSettings?
+  schedule     UserSchedule?
 
   @@map("users")
 }
 
+model UserSchedule {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  schedule  Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_schedules")
+}
+
+model UserSettings {
+  id          String   @id @default(uuid())
+  userId      String   @unique
+  sessionGoal Int      @default(8) @map("session_goal")
+  scoreGoal   Int      @default(85) @map("score_goal")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
 model Question {
-  id           String   @id @default(uuid())
-  category     String
-  subcategory  String?
-  difficulty   String
-  type         String
-  vignette     String?
-  question     String
-  options      Json
-  correctAnswer String @map("correct_answer")
-  discussion   String?
-  reference    String?
-  image        String?
-  imageCaption String? @map("image_caption")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id            String   @id @default(uuid())
+  category      String
+  subcategory   String?
+  difficulty    String
+  type          String
+  vignette      String?
+  question      String
+  options       Json
+  correctAnswer String   @map("correct_answer")
+  discussion    String?
+  reference     String?
+  image         String?
+  imageCaption  String?  @map("image_caption")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   @@map("questions")
+}
+
+model CbtSession {
+  id                   String    @id @default(uuid())
+  userId               String
+  type                 String
+  status               String
+  config               Json
+  questionIds          String[]
+  answers              Json
+  flaggedQuestionIds   String[]
+  currentQuestionIndex Int
+  startTime            DateTime
+  submittedAt          DateTime?
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@map("cbt_sessions")
+}
+
+model CbtBookmark {
+  id         String   @id @default(uuid())
+  userId     String
+  questionId String
+  createdAt  DateTime @default(now()) @map("created_at")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, questionId])
+  @@map("cbt_bookmarks")
 }

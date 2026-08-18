@@ -1,10 +1,12 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { ArrowLeft, Award, CheckCircle2, CircleAlert, Clock3, FileText, Flag, RotateCcw, XCircle } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import CbtPageShell from '@/components/cbt/CbtPageShell';
-import { questionStore } from '@/lib/questionStore';
-import { getBookmarksForUser, getCbtSession } from '@/lib/cbtSessionStore';
+import { getCbtSession } from '@/lib/cbtSessionStore';
+import { getBookmarkIds } from '@/lib/bookmarkStore';
+import cbtSessionClient from '@/api/cbtSessionClient';
+import questionClient from '@/api/questionClient';
 
 const PASSING_GRADE = 70;
 
@@ -31,7 +33,7 @@ function getCategoryAnalysis(questions, answers) {
     const current = result[question.kategori] ?? { name: question.kategori, total: 0, correct: 0 };
     const answer = answers[question.id];
     current.total += 1;
-    if (answer && answer === question.jawabanBenar) current.correct += 1;
+    if (answer && answer === question.correctAnswer) current.correct += 1;
     result[question.kategori] = current;
     return result;
   }, {});
@@ -44,17 +46,41 @@ function getCategoryAnalysis(questions, answers) {
 export default function ExamResult() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
-  const session = getCbtSession(sessionId);
+  const { user } = useAuth();
+  const [session, setSession] = useState(getCbtSession(sessionId, user?.id));
+  const [questions, setQuestions] = useState([]);
+  const [loading, setLoading] = useState(!session);
 
-  const questions = useMemo(() => {
-    if (!session) return [];
-    const questionsById = new Map(questionStore.getQuestions().map((question) => [question.id, question]));
-    return session.questionIds.map((questionId) => questionsById.get(questionId)).filter(Boolean);
-  }, [session]);
+  useEffect(() => {
+    const fetchData = async () => {
+      let currentSession = session;
+      if (!currentSession) {
+        try {
+          currentSession = await cbtSessionClient.getSession(sessionId);
+          setSession(currentSession);
+        } catch (e) {
+          setLoading(false);
+          return;
+        }
+      }
+      
+      try {
+        const { questions: fetchedQuestions } = await questionClient.getQuestions({ limit: 1000 });
+        const questionsById = new Map(fetchedQuestions.map((q) => [q.id, q]));
+        const matched = currentSession.questionIds.map((id) => questionsById.get(id)).filter(Boolean);
+        setQuestions(matched);
+      } catch (e) {
+        console.error('Failed to fetch questions:', e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, [sessionId]);
 
   const answers = session?.answers ?? {};
   const calculatedResult = useMemo(() => {
-    if (!session) return null;
+    if (!session || questions.length === 0) return null;
     let correctCount = 0;
     let incorrectCount = 0;
     let unansweredCount = 0;
@@ -62,7 +88,7 @@ export default function ExamResult() {
     questions.forEach((question) => {
       const answer = answers[question.id];
       if (!answer) unansweredCount += 1;
-      else if (answer === question.jawabanBenar) correctCount += 1;
+      else if (answer === question.correctAnswer) correctCount += 1;
       else incorrectCount += 1;
     });
 
@@ -77,13 +103,10 @@ export default function ExamResult() {
     };
   }, [answers, questions, session]);
 
-  const { user } = useAuth();
-  const bookmarkCount = user?.id ? getBookmarksForUser(user.id).length : 0;
-  const result = session?.result ? {
-    ...calculatedResult,
-    ...session.result,
-    percentage: calculatedResult?.percentage ?? 0,
-  } : calculatedResult;
+  const bookmarkCount = user?.id ? getBookmarkIds(user.id).length : 0;
+  const result = session?.result
+    ? { ...session.result, ...calculatedResult, percentage: calculatedResult?.percentage ?? 0 }
+    : calculatedResult;
   const categoryAnalysis = useMemo(() => getCategoryAnalysis(questions, answers), [answers, questions]);
   const strongestCategory = categoryAnalysis[0];
   const weakestCategory = categoryAnalysis[categoryAnalysis.length - 1];
@@ -178,15 +201,27 @@ export default function ExamResult() {
         <div className="mt-5 space-y-4">
           {questions.map((question, index) => {
             const answer = answers[question.id];
-            const isCorrect = answer === question.jawabanBenar;
+            const isCorrect = answer === question.correctAnswer;
             const isEmpty = !answer;
+            const optionText = (letter) => {
+              if (!letter) return '-';
+              const fromPilihan = question.pilihan?.[letter];
+              const fromOptions = question.options?.find((o) => o.id === letter)?.text;
+              return `${letter}. ${fromPilihan || fromOptions || ''}`.trim();
+            };
             return (
               <article key={question.id} className="rounded-xl border border-border p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div><p className="text-xs font-semibold text-primary">Soal {index + 1} · {question.kategori}</p><h3 className="mt-1 text-sm font-semibold leading-relaxed">{question.pertanyaan}</h3></div>
+                  <div>
+                    <p className="text-xs font-semibold text-primary">Soal {index + 1} · {question.kategori}</p>
+                    {question.vignette?.trim() && (
+                      <p className="mt-1 rounded-lg bg-muted/40 px-2.5 py-1.5 text-xs italic leading-relaxed text-muted-foreground">{question.vignette}</p>
+                    )}
+                    <h3 className="mt-1 text-sm font-semibold leading-relaxed">{question.pertanyaan}</h3>
+                  </div>
                   <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${isEmpty ? 'bg-amber-500/10 text-amber-700' : isCorrect ? 'bg-emerald-500/10 text-emerald-700' : 'bg-destructive/10 text-destructive'}`}>{isEmpty ? 'Kosong' : isCorrect ? 'Benar' : 'Salah'}</span>
                 </div>
-                <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2"><p className="rounded-lg bg-muted/60 px-3 py-2">Jawaban kamu: <span className="font-semibold">{answer ?? '-'}</span></p><p className="rounded-lg bg-muted/60 px-3 py-2">Jawaban benar: <span className="font-semibold text-emerald-700">{question.jawabanBenar}</span></p></div>
+                <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2"><p className="rounded-lg bg-muted/60 px-3 py-2">Jawaban kamu: <span className="font-semibold">{optionText(answer)}</span></p><p className="rounded-lg bg-muted/60 px-3 py-2">Jawaban benar: <span className="font-semibold text-emerald-700">{optionText(question.correctAnswer)}</span></p></div>
                 <div className="mt-3 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 text-sm leading-relaxed"><p className="font-semibold text-primary">Pembahasan</p><p className="mt-1 text-muted-foreground">{question.pembahasan || 'Pembahasan belum tersedia.'}</p>{question.referensi && <p className="mt-2 text-xs text-muted-foreground">Referensi: {question.referensi}</p>}</div>
               </article>
             );

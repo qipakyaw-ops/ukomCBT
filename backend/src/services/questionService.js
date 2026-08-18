@@ -21,6 +21,10 @@ class QuestionService {
       limit = 10
     } = filters;
 
+    // ponytail: query params arrive as strings; Prisma needs Int for skip/take
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.max(1, parseInt(limit, 10) || 10);
+
     const where = {};
 
     if (category) {
@@ -46,13 +50,13 @@ class QuestionService {
       ];
     }
 
-    const skip = (page - 1) * limit;
+    const skip = (pageNum - 1) * limitNum;
 
     const [questions, total] = await Promise.all([
       prisma.question.findMany({
         where,
         skip,
-        take: limit,
+        take: limitNum,
         orderBy: { createdAt: 'desc' }
       }),
       prisma.question.count({ where })
@@ -61,10 +65,10 @@ class QuestionService {
     return {
       questions,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page: pageNum,
+        limit: limitNum,
         total,
-        totalPages: Math.ceil(total / limit)
+        totalPages: Math.ceil(total / limitNum)
       }
     };
   }

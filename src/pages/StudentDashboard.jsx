@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, TrendingUp } from 'lucide-react';
+import { ArrowRight, Book, TrendingUp } from 'lucide-react';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
 import {
   LayoutDashboard, Brain, ClipboardList, ChartNoAxesColumn,
@@ -17,6 +17,7 @@ import { getSubmittedCbtSessions } from '@/lib/cbtSessionStore';
 const navItems = [
   { href: '/student/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/student/latihan', label: 'Latihan Soal', icon: Brain },
+  { href: '/student/simulasi', label: 'Simulasi Ujian', icon: Book },
   { href: '/student/riwayat', label: 'Riwayat', icon: ClipboardList },
   { href: '/student/performa', label: 'Performa', icon: ChartNoAxesColumn },
 ];
@@ -31,8 +32,41 @@ function getLocalGreeting() {
 
 export default function StudentDashboard() {
   const { user } = useAuth();
-  const sessions = useMemo(() => getSubmittedCbtSessions(), []);
+  const [sessions, setSessions] = useState([]);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(true);
   const userName = user?.name ?? 'Mahasiswa';
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!user?.id) {
+        setSessions([]);
+        setIsLoadingSessions(false);
+        return;
+      }
+      try {
+        const data = await getSubmittedCbtSessions(user.id);
+        if (!cancelled) setSessions(data);
+      } finally {
+        if (!cancelled) setIsLoadingSessions(false);
+      }
+    };
+    load();
+    const refresh = async () => {
+      if (!user?.id) return;
+      try {
+        const data = await getSubmittedCbtSessions(user.id);
+        setSessions(data);
+      } catch (err) {
+        console.error('[StudentDashboard] Failed to refresh:', err);
+      }
+    };
+    window.addEventListener('cbtSessionsRefreshed', refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('cbtSessionsRefreshed', refresh);
+    };
+  }, [user?.id]);
 
   return (
     <DashboardLayout role="student" userName={userName} navItems={navItems}>
@@ -41,6 +75,7 @@ export default function StudentDashboard() {
         <p className="mt-1 text-sm text-muted-foreground">
           Kamu telah menyelesaikan {sessions.length} sesi CBT. Terus tingkatkan performa kamu.
         </p>
+        {isLoadingSessions && <p className="mt-1 text-xs text-muted-foreground">Memuat riwayat...</p>}
       </div>
 
       <div className="mb-6 relative overflow-hidden rounded-2xl bg-primary p-6 text-primary-foreground shadow-sm">

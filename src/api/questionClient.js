@@ -146,12 +146,13 @@ class QuestionClient {
       },
     });
 
-    const data = await response.json();
-
     if (!response.ok) {
-      throw new Error(data.message || 'Failed to get question');
+      const errorBody = await response.text();
+      console.error(`DEBUG: Fetch failed for ${id}. Status: ${response.status}, Body: ${errorBody}`);
+      throw new Error(`Failed to get question ${id}. Status: ${response.status}`);
     }
 
+    const data = await response.json();
     return normalizeQuestionFromBackend(data.data.question);
   }
 

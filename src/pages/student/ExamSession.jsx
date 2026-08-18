@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Bookmark, ChevronLeft, ChevronRight, Clock3, Flag, PlayCircle, Send } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/lib/AuthContext';
 import CbtPageShell from '@/components/cbt/CbtPageShell';
-import { questionStore } from '@/lib/questionStore';
-import { getCbtSession, getBookmarksForUser, submitCbtSession, toggleBookmark, updateCbtSession } from '@/lib/cbtSessionStore';
+import questionClient from '@/api/questionClient.js';
+import { getCbtSession, submitCbtSession, updateCbtSession } from '@/lib/cbtSessionStore';
+import { loadBookmarks, getBookmarkIds, toggleBookmark } from '@/lib/bookmarkStore';
 
 function getRemainingSeconds(session) {
   if (!session?.startTime) return 0;
@@ -26,21 +27,40 @@ export default function ExamSession() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [session, setSession] = useState(() => getCbtSession(sessionId));
-  const [currentIndex, setCurrentIndex] = useState(() => getCbtSession(sessionId)?.currentQuestionIndex ?? 0);
-  const [remainingSeconds, setRemainingSeconds] = useState(() => getRemainingSeconds(getCbtSession(sessionId)));
+  
+  const [session, setSession] = useState(null);
+  const [isLoadingSession, setIsLoadingSession] = useState(true);
+  const [localAnswers, setLocalAnswers] = useState({});
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  useEffect(() => {
+    if (!sessionId || !user?.id) return;
+    
+    const nextSession = getCbtSession(sessionId, user.id);
+    
+    setSession(nextSession);
+    if (nextSession) {
+      setLocalAnswers(nextSession.answers ?? {});
+      setCurrentIndex(nextSession.currentQuestionIndex ?? 0);
+    }
+    setIsLoadingSession(false);
+  }, [sessionId, user?.id]);
+  
+  const [remainingSeconds, setRemainingSeconds] = useState(0);
   const [showSubmitDialog, setShowSubmitDialog] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState(null);
   const ignoreNavigationGuardRef = useRef(false);
+  const isUpdatingRef = useRef(false); // ponytail: flag untuk mencegah re-render saat update lokal
 
-  useEffect(() => {
-    const nextSession = getCbtSession(sessionId);
-    setSession(nextSession);
-    setRemainingSeconds(getRemainingSeconds(nextSession));
-    setCurrentIndex(nextSession?.currentQuestionIndex ?? 0);
-  }, [sessionId]);
+  // ponytail: effect ini dihapus karena duplikat dan menyebabkan state session valid menjadi null
+  // useEffect(() => {
+  //   const nextSession = getCbtSession(sessionId);
+  //   setSession(nextSession);
+  //   setRemainingSeconds(getRemainingSeconds(nextSession));
+  //   setCurrentIndex(nextSession?.currentQuestionIndex ?? 0);
+  // }, [sessionId]);
 
   useEffect(() => {
     if (!session || session.status !== 'in_progress') return undefined;
@@ -161,41 +181,104 @@ export default function ExamSession() {
     // Listen for session updates triggered elsewhere (e.g., Bookmarks page)
     const handleExternalUpdate = (e) => {
       const updated = e.detail;
-      if (!updated) return;
+      if (!updated || isUpdatingRef.current) return; // ponytail: abaikan jika sedang update lokal
       if (updated.id === session?.id) {
-        setSession(updated);
-        // Also update current index to match session's currentQuestionIndex
-        setCurrentIndex(updated.currentQuestionIndex ?? 0);
+        // ponytail: hanya re-render jika metadata selain jawaban berubah
+        const { answers: _a, ...updatedMeta } = updated;
+        const { answers: _b, ...currentMeta } = session || {};
+        if (JSON.stringify(updatedMeta) !== JSON.stringify(currentMeta)) {
+          setSession(updated);
+          setCurrentIndex(updated.currentQuestionIndex ?? 0);
+        }
       }
     };
     window.addEventListener('cbtSessionUpdated', handleExternalUpdate);
     return () => window.removeEventListener('cbtSessionUpdated', handleExternalUpdate);
   }, [session]);
 
-  const [bookmarkIds, setBookmarkIds] = useState(() => getBookmarksForUser(user?.id));
-  const questions = useMemo(() => {
-    if (!session) return [];
-    const questionsById = new Map(questionStore.getQuestions().map((question) => [question.id, question]));
-    return session.questionIds.map((questionId) => questionsById.get(questionId)).filter(Boolean);
-  }, [session]);
+  const [bookmarkIds, setBookmarkIds] = useState(() => getBookmarkIds(user?.id));
 
   useEffect(() => {
-    if (!user?.id) return undefined;
-    const updateBookmarks = () => setBookmarkIds(getBookmarksForUser(user.id));
-    updateBookmarks();
-    window.addEventListener('cbtBookmarksUpdated', updateBookmarks);
-    return () => window.removeEventListener('cbtBookmarksUpdated', updateBookmarks);
+    if (!user?.id) return;
+    let cancelled = false;
+    loadBookmarks(user.id).then((ids) => {
+      if (!cancelled) setBookmarkIds(ids);
+    });
+    return () => { cancelled = true; };
   }, [user?.id]);
+  const [questions, setQuestions] = useState([]);
+  const [isLoadingQuestions, setIsLoadingQuestions] = useState(false); // ponytail: mulai dari false
 
-  if (!session || questions.length === 0) {
+  useEffect(() => {
+    // ponytail: Hanya fetch jika session valid dan perlu fetch
+    if (!session?.id || !session.questionIds || session.questionIds.length === 0) {
+      setIsLoadingQuestions(false);
+      return;
+    }
+    
+    let cancelled = false;
+    const fetchQuestions = async () => {
+      setIsLoadingQuestions(true);
+      try {
+        const results = await Promise.all(
+          session.questionIds.map(id => questionClient.getQuestionById(id))
+        );
+
+        if (!cancelled) {
+          setQuestions(results);
+        }
+      } catch (err) {
+        console.error("QUESTION_FETCH_ERROR", err);
+        if (!cancelled) setQuestions([]);
+      } finally {
+        if (!cancelled) {
+          setIsLoadingQuestions(false);
+        }
+      }
+    };
+    fetchQuestions();
+    return () => { cancelled = true; };
+  }, [session?.id, session?.questionIds?.join(',')]);
+
+  
+  const questionsLength = questions.length;
+
+  if (isLoadingSession) {
     return (
-      <CbtPageShell title="Sesi CBT" description="Sesi tidak dapat ditemukan.">
+      <CbtPageShell title="Sesi CBT" description="Memuat sesi...">
+        <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center text-muted-foreground">
+          Memuat sesi...
+        </div>
+      </CbtPageShell>
+    );
+  }
+
+  if (!session) {
+    return (
+      <CbtPageShell title="Sesi CBT" description="Sesi tidak ditemukan">
+        <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center text-muted-foreground">
+          Sesi CBT tidak ditemukan.
+        </div>
+      </CbtPageShell>
+    );
+  }
+
+  if (isLoadingQuestions) {
+    return (
+      <CbtPageShell title="Sesi CBT" description="Memuat soal...">
+        <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center text-muted-foreground">
+          Memuat soal...
+        </div>
+      </CbtPageShell>
+    );
+  }
+
+  if (questions.length === 0) {
+    return (
+      <CbtPageShell title="Sesi CBT" description="Soal tidak tersedia">
         <div className="rounded-2xl border border-dashed border-border bg-card p-8 text-center">
           <PlayCircle className="mx-auto h-10 w-10 text-muted-foreground/60" />
-          <h2 className="mt-4 font-heading text-lg font-bold">Sesi belum tersedia</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-            Sesi mock hanya tersedia selama halaman aplikasi masih terbuka. Mulai sesi baru untuk melanjutkan.
-          </p>
+          <h2 className="mt-4 font-heading text-lg font-bold">Soal tidak tersedia</h2>
           <button type="button" onClick={() => navigate('/student/latihan')} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm hover:shadow-md">
             <ArrowLeft className="h-4 w-4" /> Kembali ke Latihan
           </button>
@@ -203,23 +286,18 @@ export default function ExamSession() {
       </CbtPageShell>
     );
   }
-
+  
   const activeIndex = Math.min(Math.max(currentIndex, 0), questions.length - 1);
   const currentQuestion = questions[activeIndex];
-  const answers = session.answers ?? {};
+
+  const answers = localAnswers; // ponytail: gunakan state lokal
   const displayVignette = currentQuestion?.vignette?.trim() || '';
-  const displayQuestionText = currentQuestion?.question?.trim() || currentQuestion?.pertanyaan?.trim() || '';
-  const displayOptions = Array.isArray(currentQuestion?.options) && currentQuestion.options.length > 0
-    ? currentQuestion.options
-    : (currentQuestion?.pilihan
-      ? Object.entries(currentQuestion.pilihan).map(([id, text]) => ({ id, text }))
-      : [
-          { id: 'A', text: currentQuestion?.optionA || '' },
-          { id: 'B', text: currentQuestion?.optionB || '' },
-          { id: 'C', text: currentQuestion?.optionC || '' },
-          { id: 'D', text: currentQuestion?.optionD || '' },
-          { id: 'E', text: currentQuestion?.optionE || '' },
-        ]);
+  // ponytail: mapping field sesuai struktur runtime
+  const displayQuestionText = currentQuestion?.question?.trim() || '';
+  const displayOptions = currentQuestion?.pilihan
+    ? Object.entries(currentQuestion.pilihan).map(([id, text]) => ({ id, text }))
+    : [];
+
   const displayImage = currentQuestion?.image?.trim() || '';
   const displayImageCaption = currentQuestion?.imageCaption?.trim() || '';
   const shouldShowVignette = currentQuestion?.type === 'vignette' || Boolean(displayVignette);
@@ -235,13 +313,13 @@ export default function ExamSession() {
   const flaggedCount = flaggedQuestionIds.length;
   const bookmarkedCount = bookmarkIds.length;
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (isExpired || isSubmitting) return;
 
     ignoreNavigationGuardRef.current = true;
     setIsSubmitting(true);
     setShowSubmitDialog(false);
-    const submittedSession = submitCbtSession(sessionId, user?.id);
+    const submittedSession = await submitCbtSession(sessionId, user?.id);
     if (submittedSession) {
       setSession(submittedSession);
       navigate(`/student/hasil/${sessionId}`);
@@ -278,8 +356,9 @@ export default function ExamSession() {
     navigate(-1);
   };
 
-  const saveSession = (updates) => {
-    const updatedSession = updateCbtSession(sessionId, updates);
+  const saveSession = async (updates) => {
+    // ponytail: sertakan user.id agar sinkron dengan updateCbtSession
+    const updatedSession = await updateCbtSession(sessionId, user?.id, updates);
     if (updatedSession) setSession(updatedSession);
   };
 
@@ -291,17 +370,18 @@ export default function ExamSession() {
 
   const handleAnswer = (answer) => {
     if (isExpired) return;
-    saveSession({ answers: { ...answers, [currentQuestion.id]: answer } });
+    setLocalAnswers((prev) => ({ ...prev, [currentQuestion.id]: answer }));
+    saveSession({ answers: { ...localAnswers, [currentQuestion.id]: answer } });
   };
 
-  const toggleBookmarkQuestion = (questionId) => {
+  const toggleBookmarkQuestion = async (questionId) => {
     if (isExpired || !user?.id) return;
-    const nextIds = toggleBookmark(user.id, questionId);
+    const nextIds = await toggleBookmark(user.id, questionId);
     setBookmarkIds(nextIds);
   };
 
   const toggleFlagQuestion = (questionId) => {
-    if (isExpired) return;
+    if (isExpired || !user?.id) return;
     const ids = flaggedQuestionIds;
     const nextIds = ids.includes(questionId)
       ? ids.filter((id) => id !== questionId)

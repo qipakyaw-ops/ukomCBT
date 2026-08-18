@@ -1,21 +1,27 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { TrendingUp, FileQuestion, Award, Flame } from 'lucide-react';
 import { getSubmittedCbtSessions } from '@/lib/cbtSessionStore';
+import { useAuth } from '@/lib/AuthContext';
+import questionClient from '@/api/questionClient';
+import { getTargets, loadTargets } from '@/lib/userSettingsStore';
 
-const STUDY_TARGET_KEY = 'study_target_sessions';
+const emptyArray = [];
 
-function parseTargetSessions() {
-  if (typeof window === 'undefined') return 10;
-  const stored = window.localStorage.getItem(STUDY_TARGET_KEY);
-  const parsed = Number(stored);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
-}
+function calculateSessionPercentage(session, questionsById) {
+  const answers = session.answers ?? {};
+  let correctCount = 0;
+  let total = 0;
 
-function getSessionPercentage(session) {
-  const correct = session.result?.correctCount ?? 0;
-  const total = session.result?.totalQuestions ?? session.questionIds?.length ?? 0;
-  if (total === 0) return 0;
-  return Math.round((correct / total) * 100);
+  session.questionIds.forEach((questionId) => {
+    const answer = answers[questionId];
+    const question = questionsById.get(questionId);
+    if (question) {
+      total++;
+      if (answer === question.correctAnswer) correctCount++;
+    }
+  });
+
+  return total > 0 ? Math.round((correctCount / total) * 100) : 0;
 }
 
 function getStreak(sessions) {
@@ -41,14 +47,60 @@ function getStreak(sessions) {
 }
 
 export default function StatsCards() {
+  const { user } = useAuth();
+  const [sessions, setSessions] = useState(emptyArray);
+  const [questionsById, setQuestionsById] = useState(() => new Map());
+  const [targetSessions, setTargetSessions] = useState(getTargets().sessionGoal);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!user?.id) {
+        setSessions(emptyArray);
+        return;
+      }
+      try {
+        const data = await getSubmittedCbtSessions(user.id);
+        if (!cancelled) setSessions(data);
+      } catch {
+        if (!cancelled) setSessions(emptyArray);
+      }
+    };
+    load();
+    const refresh = () => load();
+    window.addEventListener('cbtSessionsRefreshed', refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('cbtSessionsRefreshed', refresh);
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    loadTargets(user.id).then((t) => {
+      if (!cancelled) setTargetSessions(t.sessionGoal);
+    });
+    const onUpdate = () => setTargetSessions(getTargets().sessionGoal);
+    window.addEventListener('userSettingsUpdated', onUpdate);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('userSettingsUpdated', onUpdate);
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    questionClient.getQuestions({ limit: 1000 })
+      .then((res) => setQuestionsById(new Map(res.questions.map((q) => [q.id, q]))))
+      .catch(() => {});
+  }, []);
+
   const { stats } = useMemo(() => {
-    const sessions = getSubmittedCbtSessions();
     const submittedCount = sessions.length;
-    const totalQuestions = sessions.reduce((sum, session) => sum + (session.result?.answeredCount ?? session.questionIds?.length ?? 0), 0);
+    const totalQuestions = sessions.reduce((sum, session) => sum + session.questionIds.length, 0);
     const latestSession = sessions[0];
-    const latestScore = latestSession ? getSessionPercentage(latestSession) : 0;
+    const latestScore = latestSession ? calculateSessionPercentage(latestSession, questionsById) : 0;
     const streak = getStreak(sessions);
-    const targetSessions = parseTargetSessions();
     const progress = targetSessions > 0 ? Math.min(100, Math.round((submittedCount / targetSessions) * 100)) : 0;
 
     return {
@@ -59,7 +111,7 @@ export default function StatsCards() {
         { label: 'Streak Belajar', value: streak, suffix: 'hari', icon: Flame, tone: 'bg-amber-500/10 text-amber-600' },
       ],
     };
-  }, []);
+  }, [sessions, questionsById, targetSessions]);
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

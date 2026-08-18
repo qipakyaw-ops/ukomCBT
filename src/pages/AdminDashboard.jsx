@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
 import {
   LayoutDashboard,
@@ -13,6 +14,7 @@ import {
   MoreHorizontal,
   Upload,
 } from 'lucide-react';
+import adminClient from '@/api/adminClient.js';
 
 const navItems = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -22,21 +24,60 @@ const navItems = [
   { href: '/admin/laporan', label: 'Laporan', icon: BarChart3 },
 ];
 
-const stats = [
-  { label: 'Total Student', value: '1.248', delta: '+12%', icon: GraduationCap, tone: 'bg-primary/10 text-primary' },
-  { label: 'Bank Soal', value: '5.320', delta: '+48', icon: FileQuestion, tone: 'bg-chart-2/10 text-chart-2' },
-  { label: 'Latihan Hari Ini', value: '326', delta: '+8%', icon: ClipboardList, tone: 'bg-chart-3/10 text-chart-3' },
-  { label: 'Rata-rata Skor', value: '79', delta: '+3%', icon: TrendingUp, tone: 'bg-amber-500/10 text-amber-600' },
-];
+const CATEGORY_COLORS = ['bg-primary', 'bg-chart-2', 'bg-chart-3', 'bg-chart-4', 'bg-chart-5'];
 
-const students = [
-  { name: 'Siti Rahmawati', email: 'siti.r@email.com', tests: 42, avg: 88, joined: '12 Jul' },
-  { name: 'Budi Santoso', email: 'budi.s@email.com', tests: 31, avg: 75, joined: '10 Jul' },
-  { name: 'Maya Anggraini', email: 'maya.a@email.com', tests: 56, avg: 91, joined: '08 Jul' },
-  { name: 'Rizki Hidayat', email: 'rizki.h@email.com', tests: 18, avg: 68, joined: '05 Jul' },
-];
+function formatJoined(value) {
+  if (!value) return '-';
+  const d = new Date(value);
+  return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' });
+}
 
 export default function AdminDashboard() {
+  const navigate = useNavigate();
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    adminClient.getDashboard()
+      .then((res) => { if (!cancelled) setData(res); })
+      .catch((err) => { if (!cancelled) setError(err.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const stats = data ? [
+    { label: 'Total Student', value: data.totalStudent?.toLocaleString('id-ID') ?? '0', icon: GraduationCap, tone: 'bg-primary/10 text-primary' },
+    { label: 'Bank Soal', value: data.bankSoal?.toLocaleString('id-ID') ?? '0', icon: FileQuestion, tone: 'bg-chart-2/10 text-chart-2' },
+    { label: 'Latihan Hari Ini', value: data.latihanHariIni?.toLocaleString('id-ID') ?? '0', icon: ClipboardList, tone: 'bg-chart-3/10 text-chart-3' },
+    { label: 'Rata-rata Skor', value: String(data.rataRataSkor ?? 0), icon: TrendingUp, tone: 'bg-amber-500/10 text-amber-600' },
+  ] : [];
+
+  const students = data?.recentStudents ?? [];
+  const categories = data?.categoryDistribution ?? [];
+  const maxCount = categories.length ? Math.max(...categories.map((c) => c.count)) : 0;
+
+  if (loading) {
+    return (
+      <DashboardLayout role="admin" userName="Admin NursePrep" navItems={navItems}>
+        <div className="rounded-2xl border border-dashed border-border bg-card p-10 text-center text-muted-foreground">
+          Memuat dashboard...
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (error) {
+    return (
+      <DashboardLayout role="admin" userName="Admin NursePrep" navItems={navItems}>
+        <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-6 text-sm text-destructive">
+          Gagal memuat dashboard: {error}
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout role="admin" userName="Admin NursePrep" navItems={navItems}>
       {/* Header */}
@@ -45,7 +86,10 @@ export default function AdminDashboard() {
           <h1 className="font-heading text-2xl font-bold tracking-tight">Dashboard Admin</h1>
           <p className="mt-1 text-sm text-muted-foreground">Ringkasan platform NursePrep CBT hari ini.</p>
         </div>
-        <button className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:shadow-md">
+        <button
+          onClick={() => navigate('/admin/bank-soal')}
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:shadow-md"
+        >
           <Brain className="h-4 w-4" />
           Tambah Soal
         </button>
@@ -59,9 +103,6 @@ export default function AdminDashboard() {
               <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${s.tone}`}>
                 <s.icon className="h-5 w-5" />
               </div>
-              <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold text-emerald-600">
-                {s.delta}
-              </span>
             </div>
             <p className="mt-4 font-heading text-3xl font-bold">{s.value}</p>
             <p className="mt-0.5 text-sm text-muted-foreground">{s.label}</p>
@@ -75,50 +116,54 @@ export default function AdminDashboard() {
           <div className="rounded-2xl border border-border bg-card">
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
               <h3 className="font-heading text-base font-bold">Student Terbaru</h3>
-              <button className="text-sm font-medium text-primary hover:underline">Kelola semua</button>
+              <button onClick={() => navigate('/admin/users')} className="text-sm font-medium text-primary hover:underline">Kelola semua</button>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="px-5 py-3 font-medium">Nama</th>
-                    <th className="px-5 py-3 font-medium">Latihan</th>
-                    <th className="px-5 py-3 font-medium">Rata-rata</th>
-                    <th className="px-5 py-3 font-medium">Bergabung</th>
-                    <th className="px-5 py-3" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {students.map((s) => (
-                    <tr key={s.email} className="transition-colors hover:bg-muted/40">
-                      <td className="px-5 py-3">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary">
-                            {s.name.charAt(0)}
-                          </div>
-                          <div className="leading-tight">
-                            <p className="font-medium">{s.name}</p>
-                            <p className="text-xs text-muted-foreground">{s.email}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3 text-muted-foreground">{s.tests}</td>
-                      <td className="px-5 py-3">
-                        <span className={`font-semibold ${s.avg >= 80 ? 'text-emerald-600' : s.avg >= 70 ? 'text-amber-600' : 'text-destructive'}`}>
-                          {s.avg}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3 text-muted-foreground">{s.joined}</td>
-                      <td className="px-5 py-3 text-right">
-                        <button className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </button>
-                      </td>
+            {students.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">Belum ada student terdaftar.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                      <th className="px-5 py-3 font-medium">Nama</th>
+                      <th className="px-5 py-3 font-medium">Latihan</th>
+                      <th className="px-5 py-3 font-medium">Rata-rata</th>
+                      <th className="px-5 py-3 font-medium">Bergabung</th>
+                      <th className="px-5 py-3" />
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {students.map((s) => (
+                      <tr key={s.id} className="transition-colors hover:bg-muted/40">
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary">
+                              {(s.name || '?').charAt(0)}
+                            </div>
+                            <div className="leading-tight">
+                              <p className="font-medium">{s.name}</p>
+                              <p className="text-xs text-muted-foreground">{s.email}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-5 py-3 text-muted-foreground">{s.tests}</td>
+                        <td className="px-5 py-3">
+                          <span className={`font-semibold ${s.avg >= 80 ? 'text-emerald-600' : s.avg >= 70 ? 'text-amber-600' : 'text-destructive'}`}>
+                            {s.avg}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-muted-foreground">{formatJoined(s.joined)}</td>
+                        <td className="px-5 py-3 text-right">
+                          <button className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
 
@@ -127,25 +172,23 @@ export default function AdminDashboard() {
           {/* Category distribution */}
           <div className="rounded-2xl border border-border bg-card p-5">
             <h3 className="font-heading text-base font-bold">Distribusi Soal</h3>
-            <div className="mt-4 space-y-4">
-              {[
-                { name: 'Medikal Bedah', count: 1820, pct: 34, color: 'bg-primary' },
-                { name: 'Maternitas', count: 1240, pct: 23, color: 'bg-chart-2' },
-                { name: 'Keperawatan Anak', count: 980, pct: 18, color: 'bg-chart-3' },
-                { name: 'Keperawatan Jiwa', count: 720, pct: 14, color: 'bg-chart-4' },
-                { name: 'Lainnya', count: 560, pct: 11, color: 'bg-chart-5' },
-              ].map((c) => (
-                <div key={c.name}>
-                  <div className="mb-1.5 flex items-center justify-between text-sm">
-                    <span className="font-medium">{c.name}</span>
-                    <span className="text-muted-foreground">{c.count}</span>
+            {categories.length === 0 ? (
+              <p className="mt-4 text-sm text-muted-foreground">Belum ada soal.</p>
+            ) : (
+              <div className="mt-4 space-y-4">
+                {categories.map((c, i) => (
+                  <div key={c.category}>
+                    <div className="mb-1.5 flex items-center justify-between text-sm">
+                      <span className="font-medium">{c.category}</span>
+                      <span className="text-muted-foreground">{c.count}</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div className={`h-full rounded-full ${CATEGORY_COLORS[i % CATEGORY_COLORS.length]}`} style={{ width: `${maxCount ? Math.round((c.count / maxCount) * 100) : 0}%` }} />
+                    </div>
                   </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
-                    <div className={`h-full rounded-full ${c.color}`} style={{ width: `${c.pct}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Quick actions */}
@@ -153,13 +196,14 @@ export default function AdminDashboard() {
             <h3 className="font-heading text-base font-bold">Manajemen Cepat</h3>
             <div className="mt-3 space-y-2">
               {[
-                { label: 'Tambah Soal Baru', icon: FileQuestion },
-                { label: 'Undang Student', icon: GraduationCap },
-                { label: 'Buat Simulasi', icon: ClipboardList },
-                { label: 'Unduh Laporan', icon: BarChart3 },
+                { label: 'Tambah Soal Baru', icon: FileQuestion, to: '/admin/bank-soal' },
+                { label: 'Undang Student', icon: GraduationCap, to: '/admin/users' },
+                { label: 'Buat Simulasi', icon: ClipboardList, to: '/admin/bank-soal' },
+                { label: 'Unduh Laporan', icon: BarChart3, to: '/admin/laporan' },
               ].map((a) => (
                 <button
                   key={a.label}
+                  onClick={() => navigate(a.to)}
                   className="group flex w-full items-center justify-between rounded-xl border border-border px-3 py-2.5 text-sm font-medium transition-all hover:border-primary/40 hover:bg-accent"
                 >
                   <span className="flex items-center gap-2.5">

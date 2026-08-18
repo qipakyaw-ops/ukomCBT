@@ -1,11 +1,12 @@
 import React from 'react';
 import DashboardLayout from '@/components/dashboard/DashboardLayout';
 import { useAuth } from '@/lib/AuthContext';
-import { BarChart3, Brain, ClipboardList, LayoutDashboard } from 'lucide-react';
+import { BarChart3, Brain, Book, ClipboardList, LayoutDashboard } from 'lucide-react';
 
 const navItems = [
   { href: '/student/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/student/latihan', label: 'Latihan Soal', icon: Brain },
+  { href: '/student/simulasi', label: 'Simulasi Ujian', icon: Book },
   { href: '/student/riwayat', label: 'Riwayat', icon: ClipboardList },
   { href: '/student/performa', label: 'Performa', icon: BarChart3 },
 ];
