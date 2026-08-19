@@ -203,10 +203,24 @@ export default function ExamResult() {
             const answer = answers[question.id];
             const isCorrect = answer === question.correctAnswer;
             const isEmpty = !answer;
+            const parseOptionsSafe = (options) => {
+              if (!options) return {};
+              let parsed = options;
+              while (typeof parsed === 'string') {
+                try {
+                  parsed = JSON.parse(parsed);
+                } catch (e) {
+                  break;
+                }
+              }
+              return parsed && typeof parsed === 'object' ? parsed : {};
+            };
+
             const optionText = (letter) => {
               if (!letter) return '-';
+              const optionsObj = parseOptionsSafe(question.options);
               const fromPilihan = question.pilihan?.[letter];
-              const fromOptions = question.options?.find((o) => o.id === letter)?.text;
+              const fromOptions = optionsObj[letter]?.text;
               return `${letter}. ${fromPilihan || fromOptions || ''}`.trim();
             };
             return (

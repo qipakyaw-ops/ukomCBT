@@ -29,6 +29,21 @@ class AdminClient {
     if (!response.ok) throw new Error('Failed to export CSV');
     return response.text();
   }
+
+  // Fix double-stringified JSON in options column (admin only).
+  async fixOptionsJson() {
+    const token = localStorage.getItem('auth_token');
+    const response = await fetch(`${API_URL}/admin/questions/fix-options`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Failed to fix options JSON');
+    return data;
+  }
 }
 
 export default new AdminClient();

@@ -79,7 +79,21 @@ export default function BookmarkedQuestions() {
       </div>
       <div className="space-y-2.5">
         {items.map((q) => {
-          const correctText = q.pilihan?.[q.correctAnswer] || q.options?.find((o) => o.id === q.correctAnswer)?.text || '';
+          const parseOptionsSafe = (options) => {
+            if (!options) return {};
+            let parsed = options;
+            while (typeof parsed === 'string') {
+              try {
+                parsed = JSON.parse(parsed);
+              } catch (e) {
+                break;
+              }
+            }
+            return parsed && typeof parsed === 'object' ? parsed : {};
+          };
+
+          const optionsObj = parseOptionsSafe(q.options);
+          const correctText = q.pilihan?.[q.correctAnswer] || optionsObj[q.correctAnswer]?.text || '';
           return (
           <div key={q.id} className="group flex items-start gap-3 rounded-xl border border-border p-3 transition-all hover:border-primary/40 hover:bg-accent">
             <Bookmark className="mt-0.5 h-4 w-4 shrink-0 fill-amber-400 text-amber-500" />

@@ -16,14 +16,27 @@ function normalizeOptionsToBackend(options) {
   return { A: '', B: '', C: '', D: '', E: '' };
 }
 
-function normalizeOptionsFromBackend(options) {
-  if (typeof options === 'object' && options !== null) {
-    return Object.entries(options).map(([id, text]) => ({
-      id: String(id).toUpperCase(),
-      text: String(text || '')
-    })).filter(opt => opt.id && opt.text);
+// Safe parsing helper: parse double-stringified JSON and handle both object and string formats
+function parseOptionsSafe(options) {
+  if (!options) return {};
+  let parsed = options;
+  // Parse twice if double-stringified
+  while (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch (e) {
+      break;
+    }
   }
-  return [];
+  return parsed && typeof parsed === 'object' ? parsed : {};
+}
+
+function normalizeOptionsFromBackend(options) {
+  const optionsObj = parseOptionsSafe(options);
+  return Object.entries(optionsObj).map(([id, text]) => ({
+    id: String(id).toUpperCase(),
+    text: String(text || '')
+  })).filter(opt => opt.id && opt.text);
 }
 
 function normalizeQuestionFromBackend(backendQuestion) {

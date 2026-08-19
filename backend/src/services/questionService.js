@@ -4,6 +4,7 @@ const prisma = new PrismaClient();
 
 // Map a raw CSV row to the Prisma Question schema shape.
 // Options columns (pilihan_a..e / opsi_a..e) are combined into a JSON object.
+// IMPORTANT: Do NOT JSON.stringify for Prisma jsonb column - pass the object directly.
 function mapRowToQuestion(row) {
   const optionsObj = {
     A: row.pilihan_a || row.opsi_a || '',
@@ -21,7 +22,7 @@ function mapRowToQuestion(row) {
     type: row.type || 'normal',
     vignette: row.vignette || null,
     question: row.pertanyaan || '',
-    options: JSON.stringify(optionsObj),
+    options: optionsObj, // Pass object directly for Prisma jsonb column
     correctAnswer,
     discussion: row.pembahasan || null,
     reference: row.referensi || null,
@@ -250,6 +251,41 @@ class QuestionService {
       where: { id }
     });
     return question;
+  }
+
+  // Fix double-stringified JSON in options column across all questions.
+  // Returns { fixed: number, checked: number }
+  async fixOptionsJson() {
+    const all = await prisma.question.findMany({
+      select: { id: true, options: true },
+    });
+    let fixed = 0;
+    for (const q of all) {
+      const options = q.options;
+      let fixed = false;
+      let parsed = options;
+
+      // Parse twice if double-stringified
+      while (typeof parsed === 'string') {
+        try {
+          parsed = JSON.parse(parsed);
+        } catch {
+          break;
+        }
+      }
+
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        // Valid object, check if it was stringified
+        if (typeof options === 'string') {
+          await prisma.question.update({
+            where: { id: q.id },
+            data: { options: parsed },
+          });
+          fixed++;
+        }
+      }
+    }
+    return { fixed, checked: all.length };
   }
 }
 

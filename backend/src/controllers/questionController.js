@@ -189,6 +189,16 @@ const deduplicateQuestions = async (req, res) => {
   }
 };
 
+const fixOptionsJson = async (req, res) => {
+  try {
+    const result = await questionService.fixOptionsJson();
+    res.json({ success: true, ...result, message: `${result.fixed} soal diperbaiki` });
+  } catch (error) {
+    console.error('Fix options JSON error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fix options JSON' });
+  }
+};
+
 export {
   getAllQuestions,
   getQuestionById,
@@ -197,5 +207,6 @@ export {
   updateQuestion,
   deleteQuestion,
   importQuestions,
-  deduplicateQuestions
+  deduplicateQuestions,
+  fixOptionsJson
 };

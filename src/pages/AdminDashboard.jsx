@@ -13,6 +13,7 @@ import {
   ArrowRight,
   MoreHorizontal,
   Upload,
+  Wrench,
 } from 'lucide-react';
 import adminClient from '@/api/adminClient.js';
 
@@ -86,13 +87,29 @@ export default function AdminDashboard() {
           <h1 className="font-heading text-2xl font-bold tracking-tight">Dashboard Admin</h1>
           <p className="mt-1 text-sm text-muted-foreground">Ringkasan platform NursePrep CBT hari ini.</p>
         </div>
-        <button
-          onClick={() => navigate('/admin/bank-soal')}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:shadow-md"
-        >
-          <Brain className="h-4 w-4" />
-          Tambah Soal
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={async () => {
+              try {
+                await adminClient.fixOptionsJson();
+                alert('Opsi soal berhasil diperbaiki!');
+              } catch (err) {
+                alert('Gagal memperbaiki opsi soal: ' + err.message);
+              }
+            }}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-muted"
+          >
+            <Wrench className="h-4 w-4" />
+            Perbaiki Opsi Soal
+          </button>
+          <button
+            onClick={() => navigate('/admin/bank-soal')}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:shadow-md"
+          >
+            <Brain className="h-4 w-4" />
+            Tambah Soal
+          </button>
+        </div>
       </div>
 
       {/* Stats */}

@@ -7,7 +7,8 @@ import {
   updateQuestion,
   deleteQuestion,
   importQuestions,
-  deduplicateQuestions
+  deduplicateQuestions,
+  fixOptionsJson
 } from '../controllers/questionController.js';
 import authMiddleware from '../middlewares/auth.middleware.js';
 import roleMiddleware from '../middlewares/role.middleware.js';
@@ -23,6 +24,7 @@ router.get('/:id', authMiddleware, getQuestionById);
 router.post('/', authMiddleware, roleMiddleware(['admin']), createQuestion);
 router.post('/import', authMiddleware, roleMiddleware(['admin']), importQuestions);
 router.post('/deduplicate', authMiddleware, roleMiddleware(['admin']), deduplicateQuestions);
+router.post('/fix-options', authMiddleware, roleMiddleware(['admin']), fixOptionsJson);
 router.put('/:id', authMiddleware, roleMiddleware(['admin']), updateQuestion);
 router.delete('/:id', authMiddleware, roleMiddleware(['admin']), deleteQuestion);
 
